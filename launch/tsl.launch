@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- <arg name="camera"              value="rs_l515"/> -->
+    <arg name="camera"              value="unity_camera"/>
+
+    <arg name="camera_frame"        value="$(arg camera)_color_optical_frame"/>
+
+    
+    <node pkg="tsl" name="tsl_node" type="tsl_node" respawn="false" output="screen">
+        <param name="result_frame" value="$(arg camera_frame)" />
+    </node>
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find tsl)/rviz/tsl_hands.rviz" />
+    <node pkg="tf" type="static_transform_publisher" name="camera_to_world" args="0 0 0.9 1.5708 0 3.1416 world $(arg camera_frame) 100" />
+
+</launch>

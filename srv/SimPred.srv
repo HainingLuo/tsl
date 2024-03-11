@@ -1,0 +1,4 @@
+geometry_msgs/PoseArray gripper_poses
+std_msgs/Float32MultiArray gripper_states
+---
+geometry_msgs/PoseArray states_pred

@@ -1,0 +1,5 @@
+<launch>
+    <node name="bag_loader" pkg="tsl" type="bag_loader.py" output="screen" >
+	</node>
+
+</launch>

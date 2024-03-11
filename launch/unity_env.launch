@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<launch>
+
+	<include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+		<!-- <arg name="tcp_ip" value="localhost"/> -->
+	</include>
+
+    <!-- <node pkg="state_estimation_client" name="state_estimation_client" type="state_estimation_client_unity_twin_bag.py" output="screen">
+    </node> -->
+
+</launch>

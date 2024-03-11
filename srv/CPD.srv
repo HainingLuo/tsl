@@ -1,0 +1,4 @@
+geometry_msgs/PoseArray gripper_poses
+sensor_msgs/PointCloud2 point_cloud
+---
+sensor_msgs/PointCloud2 states
