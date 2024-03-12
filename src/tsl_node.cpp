@@ -29,7 +29,7 @@ TslNode::TslNode():
                             &TslNode::PointCloudCallback, this);
 
     // initialise services
-    adjust_client = nh.serviceClient<tsl::SimAdjust>("/unity_adjust");
+    adjust_client = nh_.serviceClient<tsl::SimAdjust>("/unity_adjust");
 
     // initialise the camera class
     sensor_msgs::CameraInfoConstPtr info_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(camera_info_topic_, nh_);
@@ -40,16 +40,20 @@ TslNode::TslNode():
     camera = Camera(intrinsicMatrix);
 
     // synchronised subscribers for rgb and depth images
-    messsage_filters::Subscriber<sensor_msgs::Image> rgb_sub(nh_, rgb_topic_, 1);
-    messsage_filters::Subscriber<sensor_msgs::Image> depth_sub(nh_, depth_topic_, 1);
-    messsage_filters::Subscriber<sensor_msgs::CameraInfo> info_sub(nh_, camera_info_topic_, 1);
+    message_filters::Subscriber<sensor_msgs::Image> rgb_sub(nh_, rgb_topic_, 1);
+    message_filters::Subscriber<sensor_msgs::Image> depth_sub(nh_, depth_topic_, 1);
+    // message_filters::Subscriber<sensor_msgs::CameraInfo> info_sub(nh_, camera_info_topic_, 1);
+    // typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
+    //                                     sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
+    // message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub, info_sub);
+    // sync.registerCallback(boost::bind(&TslNode::RGBDCallback, this, _1, _2, _3));
     typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
-                                        sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
-    message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub, info_sub);
-    sync.registerCallback(boost::bind(&TslNode::RGBDCallback, this, _1, _2, _3));
+                                        sensor_msgs::Image> MySyncPolicy;
+    message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub);
+    sync.registerCallback(boost::bind(&TslNode::RGBDCallback, this, _1, _2));
     
     // initialise the image segmentation
-    auto hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
+    hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
     
     // initialise the tsl class
     tsl = Tsl();
@@ -58,7 +62,7 @@ TslNode::TslNode():
     tsl.Y = InitialiseStates();
 
     // reset the simulation
-    ros::ServiceClient reset_client = nh.serviceClient<tsl::SimReset>("/unity_reset");
+    ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>("/unity_reset");
     tsl::SimReset reset_srv;
     // convert the eigen matrix to a posearray message
     for (int i=0; i<tsl.Y.rows(); i++) {
@@ -66,7 +70,7 @@ TslNode::TslNode():
         pose.position.x = tsl.Y(i, 0);
         pose.position.y = tsl.Y(i, 1);
         pose.position.z = tsl.Y(i, 2);
-        reset_srv.request.states_est.push_back(pose);
+        reset_srv.request.states_est.poses.push_back(pose);
     }
     // call the reset service
     if (reset_client.call(reset_srv)) {
@@ -88,15 +92,15 @@ TslNode::TslNode():
 Eigen::MatrixXf TslNode::InitialiseStates()
 {
     // call the initial states server on python side to initialise config
-    ros::ServiceClient initial_states_client = nh.serviceClient<tsl::SimAdjust>("/tsl/get_initial_states");
+    ros::ServiceClient initial_states_client = nh_.serviceClient<tsl::SimAdjust>("/tsl/get_initial_states");
     tsl::SimAdjust init_srv;
     Eigen::MatrixXf states;
     if (initial_states_client.call(init_srv)) {
         // covert the srv response to an eigen matrix
-        for (int i=0; i<init_srv.response.states_est.size(); i++) {
-            states(i, 0) = init_srv.response.states_est[i].x;
-            states(i, 1) = init_srv.response.states_est[i].y;
-            states(i, 2) = init_srv.response.states_est[i].z;
+        for (int i=0; i<init_srv.response.states_sim.poses.size(); i++) {
+            states(i, 0) = init_srv.response.states_sim.poses[i].position.x;
+            states(i, 1) = init_srv.response.states_sim.poses[i].position.y;
+            states(i, 2) = init_srv.response.states_sim.poses[i].position.z;
         }
 
         ROS_INFO("got initial states");
@@ -107,8 +111,7 @@ Eigen::MatrixXf TslNode::InitialiseStates()
 }
 
 void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, 
-                            const sensor_msgs::ImageConstPtr& depth_msg, 
-                            const sensor_msgs::CameraInfoConstPtr& info_msg)
+                            const sensor_msgs::ImageConstPtr& depth_msg)
 {
     // color segmentation of the rgb image
     cv_bridge::CvImagePtr cv_ptr;
@@ -118,7 +121,8 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
         ROS_ERROR("cv_bridge exception: %s", e.what());
         return;
     }
-    cv::Mat mask = hsv_segmenter_.segmentImage(cv_ptr->image);
+    // cv::Mat mask = hsv_segmenter_.segmentImage(cv_ptr->image);
+    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(cv_ptr->image);
 
     // extract the segmented points from the depth image
     cv_bridge::CvImagePtr cv_depth_ptr;
@@ -129,12 +133,13 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
         return;
     }
     
-    // extract the non zero points from the mask
-    std::vector<Eigen::Vector2i> pixelCoordinates;
-    cv::findNonZero(binaryImage, locations);
+    // // extract the non zero points from the mask
+    // std::vector<Eigen::Vector2i> pixelCoordinates;
+    // cv::findNonZero(mask, pixelCoordinates);
 
     // convert the pixel coordinates to 3D points
-    pcl::PointCloud<pcl::PointXYZ>::Ptr points3D = camera.convertPixelsTo3D(pixelCoordinates, cv_depth_ptr->image);
+    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, cv_depth_ptr->image);
+    // PoinCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
         
     // downsample the points
     PointCloud::Ptr cloud_filtered (new PointCloud);
@@ -148,7 +153,7 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
     }
 
     // convert the pcl point cloud to eigen matrix
-    Matrix3Xf X = cloud_downsampled->getMatrixXfMap().topRows(3);    
+    Matrix3Xf X = cloud_filtered->getMatrixXfMap().topRows(3);    
     
     // call cpd function
     tsl.step(X);
@@ -156,21 +161,21 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
     // call unity adjust service
     tsl::SimAdjust adjust_srv;
     // convert the eigen matrix to a posearray message
-    for (int i=0; i<Y.rows(); i++) {
+    for (int i=0; i<tsl.Y.rows(); i++) {
         geometry_msgs::Pose pose;
-        pose.position.x = Y(i, 0);
-        pose.position.y = Y(i, 1);
-        pose.position.z = Y(i, 2);
-        adjust_srv.request.states_est.push_back(pose);
+        pose.position.x = tsl.Y(i, 0);
+        pose.position.y = tsl.Y(i, 1);
+        pose.position.z = tsl.Y(i, 2);
+        adjust_srv.request.states_est.poses.push_back(pose);
     }
     // call the adjust service
     // TODO change the pose array to point cloud
     if (adjust_client.call(adjust_srv)) {
         // save the states
-        for (int i=0; i<adjust_srv.response.states_est.size(); i++) {
-            tsl.Y(i, 0) = adjust_srv.response.states_est[i].x;
-            tsl.Y(i, 1) = adjust_srv.response.states_est[i].y;
-            tsl.Y(i, 2) = adjust_srv.response.states_est[i].z;
+        for (int i=0; i<adjust_srv.response.states_sim.poses.size(); i++) {
+            tsl.Y(i, 0) = adjust_srv.response.states_sim.poses[i].position.x;
+            tsl.Y(i, 1) = adjust_srv.response.states_sim.poses[i].position.y;
+            tsl.Y(i, 2) = adjust_srv.response.states_sim.poses[i].position.z;
         }        
     } else {
         ROS_ERROR("Failed to call service adjust");

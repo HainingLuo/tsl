@@ -19,13 +19,13 @@ class Tsl
 private:
     int max_iter; // maximum number of iterations
     double mu; // outlier weight
-    MatrixXf Y; // control points
 
 public:
     Tsl(/* args */);
     
     // ~Tsl();
 
+    MatrixXf Y; // control points
     void CPD(const MatrixXf &X);
     MatrixXf step(const MatrixXf &X);
 };

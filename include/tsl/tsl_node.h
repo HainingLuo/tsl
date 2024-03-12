@@ -6,9 +6,12 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
 #include <pcl_ros/point_cloud.h>
+#include <pcl/filters/voxel_grid.h>
+#include <cv_bridge/cv_bridge.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
+
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <tsl/SimAdjust.h>
@@ -20,6 +23,7 @@
 #include "tsl/tsl.h"
 
 using PointCloudMsg = sensor_msgs::PointCloud2;
+using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
 
 class TslNode
 {
@@ -34,7 +38,7 @@ private:
 
     ros::NodeHandle nh_;
     ros::Publisher result_states_pub_;
-    ros::ServiceClient adjust_client
+    ros::ServiceClient adjust_client;
     Tsl tsl;
 
     // camera class
@@ -48,12 +52,17 @@ private:
     int val_min_;
     int val_max_;
     
+    // segmenter
+    ImageSegmenter hsv_segmenter_;
+
+    // functions
+    Eigen::MatrixXf InitialiseStates();
 
 public:
     TslNode();
     // ~TslNode();
     void PointCloudCallback(const PointCloudMsg::ConstPtr& msg);
-    void RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg, const sensor_msgs::CameraInfoConstPtr& info_msg);
+    void RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
 };
 
 #endif // TSL_TSL_NODE_H

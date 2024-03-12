@@ -6,6 +6,9 @@
 
 class Camera {
 public:
+    // default constructor
+    Camera() {};
+
     Camera(const Eigen::Matrix3d& intrinsicMatrix) : intrinsicMatrix_(intrinsicMatrix) {}
 
     std::vector<Eigen::Vector3d> convertPixelsTo3D(const std::vector<Eigen::Vector2i>& pixelCoordinates,
@@ -21,14 +24,14 @@ public:
         }
         return points3D;
     }
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(const std::vector<Eigen::Vector2i>& pixelCoordinates,
+    
+    pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(const std::vector<cv::Point>& pixelCoordinates,
                                                                   const cv::Mat& depthImage) {
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud(new pcl::PointCloud<pcl::PointXYZ>);
 
         for (const auto& pixel : pixelCoordinates) {
-            int x = pixel.x();
-            int y = pixel.y();
+            int x = pixel.x;
+            int y = pixel.y;
 
             double depth = depthImage.at<double>(y, x);
             Eigen::Vector3d point3D = depthTo3D(x, y, depth);

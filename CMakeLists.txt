@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(pybind11 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
+find_package(OpenCV REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -131,6 +132,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -160,6 +162,7 @@ target_link_libraries(${PROJECT_NAME}_node
   PRIVATE ${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
   Eigen3::Eigen
 )
 
