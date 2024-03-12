@@ -26,8 +26,8 @@ public:
     
     // ~Tsl();
 
-    void CPD(const MatrixXf &X, const MatrixXf &Y_pred);
-    MatrixXf step(const MatrixXf &X, const MatrixXf &Y_pred);
+    void CPD(const MatrixXf &X);
+    MatrixXf step(const MatrixXf &X);
 };
 
 

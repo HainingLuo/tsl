@@ -7,17 +7,15 @@ Tsl::Tsl(/* args */)
     std::cout << "Tsl class initialised" << std::endl;
 }
 
-void Tsl::CPD(const MatrixXf &X, const MatrixXf &Y_pred)
+void Tsl::CPD(const MatrixXf &X)
 {
     // X: (N x 3) list of downsampled point cloud points
     // Y: (M x 3) list of control points
-    // Y_pred: (M x 3) list of simulation predicted control points
     // returns: (M x 3) list of points after cpd
 
     // PARAMS: should be ros params
     float beta = 1.0; // gaussian kernel width
     float gamma = 1.0; // weight of the LLE error
-    float zeta = 10.0; // weight of the predicted error
     float alpha = 0.5; // weight of the CPD error
     float tolerance = 1e-4; // tolerance for convergence
     // float tolerance = 0.0002; // tolerance for convergence
@@ -116,12 +114,6 @@ void Tsl::CPD(const MatrixXf &X, const MatrixXf &Y_pred)
 
         MatrixXf p1d = P1.asDiagonal();
 
-        // MatrixXf A = (P1.asDiagonal() * G) + alpha * sigma2 * MatrixXf::Identity(M, M) + sigma2 * gamma * (H * G) +
-        //          zeta * G;
-
-        // MatrixXf B =
-        //     PX.transpose() - (p1d + sigma2 * gamma * H) * Y.transpose() + zeta * (Y_pred.transpose() - Y.transpose());
-
         MatrixXf A = (P1.asDiagonal() * G) + alpha * sigma2 * MatrixXf::Identity(M, M) + sigma2 * gamma * (H * G);
 
         MatrixXf B =
@@ -162,20 +154,20 @@ void Tsl::CPD(const MatrixXf &X, const MatrixXf &Y_pred)
     std::cout << "Finished without convergence" << std::endl;
 }
 
-MatrixXf Tsl::step(const MatrixXf &X, const MatrixXf &Y_pred)
+MatrixXf Tsl::step(const MatrixXf &X)
 {
     // X: (N x 3) list of downsampled point cloud points
     // Y: (M x 3) list of control points
-    // Y_pred: (M x 3) list of simulation predicted control points
     // returns: (M x 3) list of points after cpd
     // check if Y is empty
     if (Y.rows() == 0) {
+        std::cout << "Y is empty" << std::endl;
         // initialise Y
         Y = X;
         return Y;
     }
     else {
-        CPD(X, Y_pred);
+        CPD(X);
         return Y;
     }
 

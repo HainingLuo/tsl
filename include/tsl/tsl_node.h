@@ -34,6 +34,7 @@ private:
 
     ros::NodeHandle nh_;
     ros::Publisher result_states_pub_;
+    ros::ServiceClient adjust_client
     Tsl tsl;
 
     // camera class

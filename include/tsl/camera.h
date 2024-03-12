@@ -1,23 +1,47 @@
 #include <Eigen/Dense>
 #include <vector>
 
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+
 class Camera {
 public:
     Camera(const Eigen::Matrix3d& intrinsicMatrix) : intrinsicMatrix_(intrinsicMatrix) {}
 
     std::vector<Eigen::Vector3d> convertPixelsTo3D(const std::vector<Eigen::Vector2i>& pixelCoordinates,
-                                                   const std::vector<Eigen::Vector3d>& rgbImage,
-                                                   const std::vector<double>& depthImage) {
+                                                   const cv::Mat& depthImage) {
         std::vector<Eigen::Vector3d> points3D;
         for (const auto& pixel : pixelCoordinates) {
             int x = pixel.x();
             int y = pixel.y();
 
-            double depth = depthImage[y * width_ + x];
+            double depth = depthImage.at<double>(y, x);
             Eigen::Vector3d point3D = depthTo3D(x, y, depth);
             points3D.push_back(point3D);
         }
         return points3D;
+    }
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(const std::vector<Eigen::Vector2i>& pixelCoordinates,
+                                                                  const cv::Mat& depthImage) {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+        for (const auto& pixel : pixelCoordinates) {
+            int x = pixel.x();
+            int y = pixel.y();
+
+            double depth = depthImage.at<double>(y, x);
+            Eigen::Vector3d point3D = depthTo3D(x, y, depth);
+
+            pcl::PointXYZ pclPoint;
+            pclPoint.x = point3D.x();
+            pclPoint.y = point3D.y();
+            pclPoint.z = point3D.z();
+
+            pointCloud->push_back(pclPoint);
+        }
+
+        return pointCloud;
     }
 
 private:

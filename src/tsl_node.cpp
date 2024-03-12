@@ -29,6 +29,7 @@ TslNode::TslNode():
                             &TslNode::PointCloudCallback, this);
 
     // initialise services
+    adjust_client = nh.serviceClient<tsl::SimAdjust>("/unity_adjust");
 
     // initialise the camera class
     sensor_msgs::CameraInfoConstPtr info_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(camera_info_topic_, nh_);
@@ -49,36 +50,60 @@ TslNode::TslNode():
     
     // initialise the image segmentation
     auto hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
-
-    // initialise the states
-    InitialiseStates();
     
     // initialise the tsl class
     tsl = Tsl();
+
+    // initialise the states
+    tsl.Y = InitialiseStates();
 
     // reset the simulation
     ros::ServiceClient reset_client = nh.serviceClient<tsl::SimReset>("/unity_reset");
     tsl::SimReset reset_srv;
     // convert the eigen matrix to a posearray message
+    for (int i=0; i<tsl.Y.rows(); i++) {
+        geometry_msgs::Pose pose;
+        pose.position.x = tsl.Y(i, 0);
+        pose.position.y = tsl.Y(i, 1);
+        pose.position.z = tsl.Y(i, 2);
+        reset_srv.request.states_est.push_back(pose);
+    }
+    // call the reset service
+    if (reset_client.call(reset_srv)) {
+        // save the states
+        // for (int i=0; i<reset_srv.response.states_est.size(); i++) {
+        //     tsl.Y(i, 0) = reset_srv.response.states_est[i].x;
+        //     tsl.Y(i, 1) = reset_srv.response.states_est[i].y;
+        //     tsl.Y(i, 2) = reset_srv.response.states_est[i].z;
+        // }   
+        // no need to save, same as the initial states     
+    } else {
+        ROS_ERROR("Failed to call service reset");
+    }
 
     ROS_INFO_STREAM("Tsl node initialised");
     ros::spin();
 }
 
-void TslNode::InitialiseStates()
+Eigen::MatrixXf TslNode::InitialiseStates()
 {
     // call the initial states server on python side to initialise config
     ros::ServiceClient initial_states_client = nh.serviceClient<tsl::SimAdjust>("/tsl/get_initial_states");
     tsl::SimAdjust init_srv;
+    Eigen::MatrixXf states;
     if (initial_states_client.call(init_srv)) {
         // covert the srv response to an eigen matrix
-        
-        // save the states to the tsl class
+        for (int i=0; i<init_srv.response.states_est.size(); i++) {
+            states(i, 0) = init_srv.response.states_est[i].x;
+            states(i, 1) = init_srv.response.states_est[i].y;
+            states(i, 2) = init_srv.response.states_est[i].z;
+        }
 
         ROS_INFO("got initial states");
     } else {
         ROS_ERROR("Failed to call service get_initial_states");
     }
+    return states;
 }
 
 void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, 
@@ -86,22 +111,75 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
                             const sensor_msgs::CameraInfoConstPtr& info_msg)
 {
     // color segmentation of the rgb image
+    cv_bridge::CvImagePtr cv_ptr;
+    try {
+        cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
+    } catch (cv_bridge::Exception& e) {
+        ROS_ERROR("cv_bridge exception: %s", e.what());
+        return;
+    }
+    cv::Mat mask = hsv_segmenter_.segmentImage(cv_ptr->image);
+
+    // extract the segmented points from the depth image
+    cv_bridge::CvImagePtr cv_depth_ptr;
+    try {
+        cv_depth_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_16UC1);
+    } catch (cv_bridge::Exception& e) {
+        ROS_ERROR("cv_bridge exception: %s", e.what());
+        return;
+    }
+    
+    // extract the non zero points from the mask
+    std::vector<Eigen::Vector2i> pixelCoordinates;
+    cv::findNonZero(binaryImage, locations);
+
+    // convert the pixel coordinates to 3D points
+    pcl::PointCloud<pcl::PointXYZ>::Ptr points3D = camera.convertPixelsTo3D(pixelCoordinates, cv_depth_ptr->image);
+        
+    // downsample the points
+    PointCloud::Ptr cloud_filtered (new PointCloud);
+    pcl::VoxelGrid<pcl::PointXYZ> sor;
+    sor.setInputCloud (points3D);
+    sor.setLeafSize (0.02f, 0.02f, 0.02f);
+    sor.filter (*cloud_filtered);
+    if (cloud_filtered->size() == 0) {
+        ROS_WARN("No points in the downsampled point cloud!");
+        return;
+    }
+
+    // convert the pcl point cloud to eigen matrix
+    Matrix3Xf X = cloud_downsampled->getMatrixXfMap().topRows(3);    
+    
+    // call cpd function
+    tsl.step(X);
+
+    // call unity adjust service
+    tsl::SimAdjust adjust_srv;
+    // convert the eigen matrix to a posearray message
+    for (int i=0; i<Y.rows(); i++) {
+        geometry_msgs::Pose pose;
+        pose.position.x = Y(i, 0);
+        pose.position.y = Y(i, 1);
+        pose.position.z = Y(i, 2);
+        adjust_srv.request.states_est.push_back(pose);
+    }
+    // call the adjust service
+    // TODO change the pose array to point cloud
+    if (adjust_client.call(adjust_srv)) {
+        // save the states
+        for (int i=0; i<adjust_srv.response.states_est.size(); i++) {
+            tsl.Y(i, 0) = adjust_srv.response.states_est[i].x;
+            tsl.Y(i, 1) = adjust_srv.response.states_est[i].y;
+            tsl.Y(i, 2) = adjust_srv.response.states_est[i].z;
+        }        
+    } else {
+        ROS_ERROR("Failed to call service adjust");
+    }
+
+    // publish result states
+    PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
 
 
-
-    // convert the rgb and depth images to pcl point cloud
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
-    // convert the pcl point cloud to an eigen matrix
-    MatrixXf X(cloud->size(), 3);
-
-    // get observation and action
-    // send action to simulation
-    // get simmulation predicted states
-    // call cpd with observation, action and simmulation predicted states
-    // get cpd predicted states back
-    // send cpd predicted states to simulation controller
-    // get simmulation states
-    // update states
 }
 
 void TslNode::PointCloudCallback(const PointCloudMsg::ConstPtr& msg)
@@ -128,11 +206,8 @@ void TslNode::PointCloudCallback(const PointCloudMsg::ConstPtr& msg)
         X(i, 2) = cloud->points[i].z;
     }
 
-    // get prediction from the physics engine
-    MatrixXf Y_pred;
-
     // run the cpd algorithm
-    MatrixXf Y = tsl.step(X, Y_pred);
+    MatrixXf Y = tsl.step(X);
 
     // convert the eigen matrix to a pcl point cloud
     pcl::PointCloud<pcl::PointXYZ>::Ptr result_states (new pcl::PointCloud<pcl::PointXYZ>);
