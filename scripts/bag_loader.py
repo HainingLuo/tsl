@@ -55,6 +55,7 @@ class PointRegistrationNode:
     registration_srv_topic = '/registration'
     package_name = 'state_estimation_client'
     num_ctrl_pts = 25
+    num_eyelets = 4
     sample_density = 500 # the number of points in X
     datatype = {1:1, 2:1, 3:2, 4:2, 5:4, 6:4, 7:4, 8:8}
     insertion_frame_ids = [79, 333, 754, 1191]
@@ -67,6 +68,9 @@ class PointRegistrationNode:
         self.depth_topic_compressed = f'/{self.camera_name}/aligned_depth_to_color/image_raw/compressed'
         self.info_topic = f'/{self.camera_name}/aligned_depth_to_color/camera_info'
         self.frame = f'{self.camera_name}_color_optical_frame'
+        self.eyelets_topic = '/eyelet_pose'
+        self.eyelets_init_topic = '/eyelet_init'
+        self.aglet_topic = '/aglet_pose'
         self.tsl_output_topic = '/tsl/result_states'
         self.tsl_input_topic = '/tsl/segmented_pc'
         self.bag_name = 'manip.bag'
@@ -84,6 +88,7 @@ class PointRegistrationNode:
         self.pts_pub = rospy.Publisher(self.tsl_input_topic, PointCloud2, queue_size=10)
         self.mask_pub = rospy.Publisher('tsl/mask', Image, queue_size=10)
         self.img_pub = rospy.Publisher('tsl/img', Image, queue_size=10)
+        eyelet_init_pub = rospy.Publisher(self.eyelets_init_topic, PoseArray, queue_size=1)
         rospy.Subscriber(self.tsl_output_topic, PointCloud2, self.cb)
         rospy.sleep(1)
 
