@@ -1,0 +1,86 @@
+#ifndef TSL_TSL_BAG_H
+#define TSL_TSL_BAG_H
+
+#include <ros/ros.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_types.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/filters/voxel_grid.h>
+#include <cv_bridge/cv_bridge.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+
+#include <iostream>
+#include <fstream>
+#include <yaml-cpp/yaml.h>
+
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/CameraInfo.h>
+#include <tsl/SimAdjust.h>
+#include <tsl/SimReset.h>
+#include <tsl/segmenter.h>
+#include <tsl/camera.h>
+
+#include <tsl/gmm.h>
+#include "tsl/tsl.h"
+
+using PointCloudMsg = sensor_msgs::PointCloud2;
+using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
+
+class TslBag
+{
+private:
+    // topics
+    std::string result_frame_;
+    std::string rgb_topic_;
+    std::string depth_topic_;
+    std::string camera_info_topic_;
+    std::string unity_reset_service_;
+    std::string unity_adjust_service_;
+    std::string robot_frame;
+    std::string camera_frame;
+    std::string bag_path;
+    std::string bag_config_path;
+
+    // 
+    int num_state_points;
+    int num_messages;
+    std::vector<float> cam_pose;
+    cv::Point resolution;
+
+    ros::NodeHandle nh_;
+    ros::Publisher result_states_pub_;
+    ros::ServiceClient adjust_client;
+    Tsl tsl;
+
+    // camera class
+    Camera camera;
+
+    // segmentation parameters
+    int hue_min_;
+    int hue_max_;
+    int sat_min_;
+    int sat_max_;
+    int val_min_;
+    int val_max_;
+    
+    // segmenter
+    ImageSegmenter hsv_segmenter_;
+
+    // functions
+    Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth);
+    void ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg);
+    cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg);
+    cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg);
+    Eigen::MatrixXf GetSegmentedPoints(const cv::Mat& image, const cv::Mat& depth);
+
+public:
+    TslBag();
+    // ~TslBag();
+    void PointCloudCallback(const PointCloudMsg::ConstPtr& msg);
+    void RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
+};
+
+#endif // TSL_TSL_BAG_H

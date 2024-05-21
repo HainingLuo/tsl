@@ -24,7 +24,7 @@ find_package(pybind11 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
-
+find_package(yaml-cpp REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -166,8 +166,21 @@ target_link_libraries(${PROJECT_NAME}_node
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
   Eigen3::Eigen
+  yaml-cpp
 )
 
+add_executable(
+  ${PROJECT_NAME}_bag src/tsl_bag.cpp
+)
+add_dependencies(${PROJECT_NAME}_bag ${catkin_EXPORTED_TARGETS})
+target_link_libraries(${PROJECT_NAME}_bag
+  PRIVATE ${PROJECT_NAME}
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  yaml-cpp
+)
 
 
 #############

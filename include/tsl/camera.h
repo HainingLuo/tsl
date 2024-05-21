@@ -11,16 +11,16 @@ public:
 
     Camera(const Eigen::Matrix3d& intrinsicMatrix) : intrinsicMatrix_(intrinsicMatrix) {}
 
-    std::vector<Eigen::Vector3d> convertPixelsTo3D(const std::vector<Eigen::Vector2i>& pixelCoordinates,
-                                                   const cv::Mat& depthImage) {
-        std::vector<Eigen::Vector3d> points3D;
-        for (const auto& pixel : pixelCoordinates) {
-            int x = pixel.x();
-            int y = pixel.y();
+    Eigen::MatrixXf convertPixelsTo3D(const std::vector<Eigen::Vector2i>& pixelCoordinates,
+                                      const cv::Mat& depthImage) {
+        Eigen::MatrixXf points3D(pixelCoordinates.size(), 3);
+        for (int i = 0; i < pixelCoordinates.size(); i++) {
+            int x = pixelCoordinates[i].x();
+            int y = pixelCoordinates[i].y();
 
             double depth = depthImage.at<double>(y, x);
             Eigen::Vector3d point3D = depthTo3D(x, y, depth);
-            points3D.push_back(point3D);
+            points3D.row(i) = point3D.cast<float>().transpose();
         }
         return points3D;
     }
