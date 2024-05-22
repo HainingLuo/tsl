@@ -5,56 +5,78 @@ TslBag::TslBag():
 {
     // get parameters
     // get image and info topics
-    nh_.getParam("/tsl/rgb_topic", rgb_topic_);
-    nh_.getParam("/tsl/depth_topic", depth_topic_);
-    nh_.getParam("/tsl/camera_info_topic", camera_info_topic_);
-    nh_.getParam("/tsl/result_frame", result_frame_);
-    nh_.getParam("/tsl/unity_reset", unity_reset_service_);
-    nh_.getParam("/tsl/unity_adjust", unity_adjust_service_);
-    nh_.getParam("/tsl/bag_path", bag_path);
-    nh_.getParam("/tsl/bag_config_path", bag_config_path);
-    nh_.getParam("/tsl/cam_pose", cam_pose);
-    nh_.getParam("/tsl/robot_frame", robot_frame);
-    nh_.getParam("/tsl/camera_frame", camera_frame);
-    nh_.getParam("/tsl/num_state_points", num_state_points);
-
+    nh_.getParam("/tsl_bag/rgb_topic", rgb_topic_);
+    nh_.getParam("/tsl_bag/depth_topic", depth_topic_);
+    nh_.getParam("/tsl_bag/camera_info_topic", camera_info_topic_);
+    nh_.getParam("/tsl_bag/eyelet_init_topic", eyelet_init_topic_);
+    nh_.getParam("/tsl_bag/eyelet_pose_topic", eyelet_topic_);
+    nh_.getParam("/tsl_bag/aglet_pose_topic", aglet_topic_);
+    nh_.getParam("/tsl_bag/result_pc_topic", result_pc_topic_);
+    nh_.getParam("/tsl_bag/result_frame", result_frame_);
+    nh_.getParam("/tsl_bag/unity_reset_service_", unity_reset_service_);
+    nh_.getParam("/tsl_bag/unity_adjust_service_", unity_adjust_service_);
+    nh_.getParam("/tsl_bag/unity_predict_service_", unity_predict_service_);
+    nh_.getParam("/tsl_bag/bag_path", bag_path);
+    nh_.getParam("/tsl_bag/bag_config_path", bag_config_path);
+    nh_.getParam("/tsl_bag/cam_pose", cam_pose);
+    nh_.getParam("/tsl_bag/robot_frame", robot_frame);
+    nh_.getParam("/tsl_bag/camera_frame", camera_frame);
+    nh_.getParam("/tsl_bag/num_state_points", num_state_points);
+    nh_.getParam("/tsl_bag/rope_length", rope_length);
+    nh_.getParam("/tsl_bag/rope_radius", rope_radius);
     // get segmentation parameters
-    nh_.getParam("/tsl/segmentation/hue_min", hue_min_);
-    nh_.getParam("/tsl/segmentation/hue_max", hue_max_);
-    nh_.getParam("/tsl/segmentation/sat_min", sat_min_);
-    nh_.getParam("/tsl/segmentation/sat_max", sat_max_);
-    nh_.getParam("/tsl/segmentation/val_min", val_min_);
-    nh_.getParam("/tsl/segmentation/val_max", val_max_);
+    nh_.getParam("/tsl_bag/segmentation/hue_min", hue_min_);
+    nh_.getParam("/tsl_bag/segmentation/hue_max", hue_max_);
+    nh_.getParam("/tsl_bag/segmentation/sat_min", sat_min_);
+    nh_.getParam("/tsl_bag/segmentation/sat_max", sat_max_);
+    nh_.getParam("/tsl_bag/segmentation/val_min", val_min_);
+    nh_.getParam("/tsl_bag/segmentation/val_max", val_max_);
 
 
     // initialise publishers
-    result_states_pub_ = nh_.advertise<PointCloudMsg>("/tsl/result_states", 10);
+    result_states_pub_ = nh_.advertise<PointCloudMsg>(result_pc_topic_, 10);
+    ros::Publisher aglet_pub_ = nh_.advertise<geometry_msgs::PoseArray>(aglet_topic_, 10);
+    ros::Publisher eyelet_init_pub = nh_.advertise<geometry_msgs::PoseArray>(eyelet_init_topic_, 10);
 
-    // // initialise subscribers
+    // initialise subscribers
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_(tf_buffer_);
     // ros::Subscriber sub = nh_.subscribe<PointCloudMsg>("/tsl/segmented_pc", 10, 
     //                         &TslBag::PointCloudCallback, this);
 
     // initialise services
-    adjust_client = nh_.serviceClient<tsl::SimAdjust>("/unity_adjust");
+    adjust_client = nh_.serviceClient<tsl::SimAdjust>(unity_adjust_service_);
+
+    // wait for 1 second
+    ros::Duration(1).sleep();
 
     // load the ROS bag
     rosbag::Bag bag;
     bag.open(bag_path, rosbag::bagmode::Read);
-    ROS_INFo_STREAM("Opened bag: " << bag_path);
+    ROS_INFO_STREAM("Opened bag: " + bag_path);
 
     // read the number of rgb_topic_ and depth_topic_ messages in the bag
     // rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_}));
     rosbag::View view_image(bag, rosbag::TopicQuery({rgb_topic_}));
     rosbag::View view_depth(bag, rosbag::TopicQuery({depth_topic_}));
-    num_messages = view.size();
+    num_messages = view_image.size()+view_depth.size();
     ROS_INFO_STREAM("Number of messages in the bag: " << num_messages);
 
     // static tf broadcaster for camera pose
-    static tf::TransformBroadcaster br;
-    tf::Transform transform;
-    transform.setOrigin(tf::Vector3(cam_pose[0], cam_pose[1], cam_pose[2]));
-    transform.setRotation(tf::Quaternion(cam_pose[3], cam_pose[4], cam_pose[5], cam_pose[6]));
-    br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "world", "camera"));
+    static tf2_ros::StaticTransformBroadcaster br;
+    geometry_msgs::TransformStamped tf_msg;
+    tf_msg.header.stamp = ros::Time::now();
+    tf_msg.header.frame_id = robot_frame;
+    tf_msg.child_frame_id = camera_frame;
+    tf_msg.transform.translation.x = cam_pose[0];
+    tf_msg.transform.translation.y = cam_pose[1];
+    tf_msg.transform.translation.z = cam_pose[2];
+    tf_msg.transform.rotation.x = cam_pose[3];
+    tf_msg.transform.rotation.y = cam_pose[4];
+    tf_msg.transform.rotation.z = cam_pose[5];
+    tf_msg.transform.rotation.w = cam_pose[6];
+    br.sendTransform(tf_msg);
+    ROS_INFO_STREAM("Broadcasted camera pose");
 
     // load the camera info message
     rosbag::View view_info(bag, rosbag::TopicQuery({camera_info_topic_}));
@@ -66,6 +88,7 @@ TslBag::TslBag():
                         info_msg->K[3], info_msg->K[4], info_msg->K[5],
                         info_msg->K[6], info_msg->K[7], info_msg->K[8];
     camera = Camera(intrinsicMatrix);
+    ROS_INFO_STREAM("Loaded camera info");
 
     // load the first image message
     rosbag::View::iterator it = view_image.begin();
@@ -79,21 +102,6 @@ TslBag::TslBag():
     rosbag::MessageInstance const n = *it;
     sensor_msgs::Image::ConstPtr depth_msg = n.instantiate<sensor_msgs::Image>();
     cv::Mat init_depth = DepthToCvMat(depth_msg);
-
-    // read /tsl_data/shoelacing_4_2.yaml
-    std::string data_path = "/tsl_data";
-    std::string bagfile_name = "shoelacing_4_2";
-    std::string yaml_path = path.join(data_path, bagfile_name+".yaml");
-    YAML::Node yaml = YAML::LoadFile(yaml_path);
-    std::vector<cv::Vec4d> eyelets;
-    for (int i = 0; i < yaml["eyelets"].size(); i++) {
-        cv::Vec4d eyelet;
-        eyelet[0] = yaml["eyelets"][i][0].as<double>();
-        eyelet[1] = yaml["eyelets"][i][1].as<double>();
-        eyelet[2] = yaml["eyelets"][i][2].as<double>();
-        eyelet[3] = yaml["eyelets"][i][3].as<double>();
-        eyelets.push_back(eyelet);
-    }
 
     // // synchronised subscribers for rgb and depth images
     // message_filters::Subscriber<sensor_msgs::Image> rgb_sub(nh_, rgb_topic_, 1);
@@ -115,39 +123,50 @@ TslBag::TslBag():
     tsl = Tsl();
 
     // initialise the states
-    tsl.Y = InitialiseStates();
+    // tsl.Y = InitialiseStates(init_img, init_depth);
 
-    // load and publish the eyelet poses
-    // 
-    eyelets_traj = np.load(path.join(data_path, bagfile_name+".npy"));
-    eyelets.clear();
-    geometry_msgs::PoseArray eyelet_msg;
-    eyelet_msg.header.frame_id = camera_frame;
-    for (int i = 0; i < eyelets_traj.size(); i++) {
-        int eyelet_x = eyelets_traj[i][0][1] + eyelets_traj[i][0][3] / 2;
-        int eyelet_y = eyelets_traj[i][0][0] + eyelets_traj[i][0][2] / 2;
-        geometry_msgs::Pose p;
-        cv::Point3d eyelet_3d = read_point_from_region(cv::Point(eyelet_x, eyelet_y), depth, 20, "middle", camera_intrinsics);
-        cv::Point3d eyelet_offset(0, 0, 0.002);
-        p.position.x = eyelet_3d.x + eyelet_offset.x;
-        p.position.y = eyelet_3d.y + eyelet_offset.y;
-        p.position.z = eyelet_3d.z + eyelet_offset.z;
-        tf::Quaternion eyelet_orientation = tf::createQuaternionFromRPY(0, M_PI / 6 * pow(-1, i + 1), 0);
-        p.orientation.x = eyelet_orientation.x();
-        p.orientation.y = eyelet_orientation.y();
-        p.orientation.z = eyelet_orientation.z();
-        p.orientation.w = eyelet_orientation.w();
-        eyelets.push_back(cv::Vec4d(eyelet_3d.x, eyelet_3d.y, eyelet_3d.z, eyelet_orientation));
-        eyelet_msg.poses.push_back(p);
+    // read bag_config_path yaml file
+    YAML::Node config = YAML::LoadFile(bag_config_path);
+
+    // read the initial eyelet poses
+    std::vector<geometry_msgs::Pose> eyelet_poses;
+    for (int i=0; i<config["eyelets_init"].size(); i++) {
+        geometry_msgs::Pose pose;
+        pose.position.x = config["eyelets_init"][i][0].as<float>();
+        pose.position.y = config["eyelets_init"][i][1].as<float>();
+        pose.position.z = config["eyelets_init"][i][2].as<float>();
+        pose.orientation.x = config["eyelets_init"][i][3].as<float>();
+        pose.orientation.y = config["eyelets_init"][i][4].as<float>();
+        pose.orientation.z = config["eyelets_init"][i][5].as<float>();
+        pose.orientation.w = config["eyelets_init"][i][6].as<float>();
+        eyelet_poses.push_back(pose);
     }
-    ros::Duration(1).sleep();
-    eyelet_init_pub.publish(eyelet_msg);
-    ROS_INFO("eyelet poses published");
-
-
+    geometry_msgs::PoseArray eyelet_poses_msg;
+    eyelet_poses_msg.header.frame_id = result_frame_;
+    eyelet_poses_msg.poses = eyelet_poses;
+    // read the initial aglet poses
+    geometry_msgs::PoseArray aglet_poses_msg;
+    geometry_msgs::Pose aglet_1_pose, aglet_2_pose;
+    aglet_1_pose.position.x = config["aglet_1_init"][0].as<float>();
+    aglet_1_pose.position.y = config["aglet_1_init"][1].as<float>();
+    aglet_1_pose.position.z = config["aglet_1_init"][2].as<float>();    
+    aglet_2_pose.position.x = config["aglet_2_init"][0].as<float>();
+    aglet_2_pose.position.y = config["aglet_2_init"][1].as<float>();
+    aglet_2_pose.position.z = config["aglet_2_init"][2].as<float>();
+    aglet_poses_msg.header.frame_id = robot_frame;
+    aglet_poses_msg.poses.push_back(aglet_1_pose);
+    aglet_poses_msg.poses.push_back(aglet_2_pose);
+    // read the initial states
+    Eigen::MatrixXf initial_states(config["states_init"].size(), 3);
+    for (int i=0; i<config["states_init"].size(); i++) {
+        initial_states.row(i) << config["states_init"][i][0].as<float>(),
+                                 config["states_init"][i][1].as<float>(),
+                                 config["states_init"][i][2].as<float>();
+    }
+    tsl.Y = initial_states;
 
     // reset the simulation
-    ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>("/unity_reset");
+    ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>(unity_reset_service_);
     tsl::SimReset reset_srv;
     // convert the eigen matrix to a posearray message
     for (int i=0; i<tsl.Y.rows(); i++) {
@@ -157,6 +176,19 @@ TslBag::TslBag():
         pose.position.z = tsl.Y(i, 2);
         reset_srv.request.states_est.poses.push_back(pose);
     }
+    reset_srv.request.rope_length.data = rope_length;
+    reset_srv.request.rope_radius.data = rope_radius;
+    reset_srv.request.gripper_poses = aglet_poses_msg;
+    reset_srv.request.gripper_states.data.push_back(0.0); // 0.0: open, 1.0: close
+    reset_srv.request.gripper_states.data.push_back(0.0);
+    // get the cam2rob transform
+    geometry_msgs::TransformStamped cam2rob_msg;
+    try {
+        cam2rob_msg = tf_buffer_.lookupTransform(robot_frame, camera_frame, ros::Time(0));
+    } catch (tf2::TransformException &ex) {
+        ROS_WARN("%s", ex.what());
+    }
+    reset_srv.request.cam2rob = cam2rob_msg.transform;
     // call the reset service
     if (reset_client.call(reset_srv)) {
         // save the states
@@ -165,10 +197,15 @@ TslBag::TslBag():
         //     tsl.Y(i, 1) = reset_srv.response.states_est[i].y;
         //     tsl.Y(i, 2) = reset_srv.response.states_est[i].z;
         // }   
-        // no need to save, same as the initial states     
+        // no need to save, same as the initial states  
+        ROS_INFO("Unity environment reset");
     } else {
         ROS_ERROR("Failed to call service reset");
     }
+
+    // publish the initial eyelet and aglet poses
+    eyelet_init_pub.publish(eyelet_poses_msg);
+    aglet_pub_.publish(aglet_poses_msg);
 
     ROS_INFO_STREAM("Tsl bag node initialised");
     ros::spin();
@@ -176,13 +213,14 @@ TslBag::TslBag():
 
 Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth)
 {
-    // get the segmented points
-    Eigen::MatrixXf X = GetSegmentedPoints(init_img, init_depth);
-    // apply gaussian mixture model to the points
-    GaussianMixtureModel gmm = GaussianMixtureModel(num_state_points, maxIterations=10000);
-    gmm.fit(X);
-    // get the states from the gmm
-    return gmm.getMeans();
+    // // get the segmented points
+    // Eigen::MatrixXf X = GetSegmentedPoints(init_img, init_depth);
+    // // apply gaussian mixture model to the points
+    // GaussianMixtureModel gmm = GaussianMixtureModel(num_state_points, maxIterations=10000);
+    // gmm.fit(X);
+    // // get the states from the gmm
+    // return gmm.getMeans();
+    return Eigen::MatrixXf();
 }
 
 void TslBag::ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg)
@@ -229,7 +267,7 @@ void TslBag::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
 
     // convert the pixel coordinates to 3D points
     PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, cv_depth_ptr->image);
-    // PoinCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
+    // PointCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
         
     // downsample the points
     PointCloud::Ptr cloud_filtered (new PointCloud);
@@ -290,7 +328,7 @@ void TslBag::PointCloudCallback(const PointCloudMsg::ConstPtr& msg)
     // update states
 
     // convert the point cloud message to a pcl point cloud
-    PoinCloud::Ptr cloud (new PoinCloud);
+    PointCloud::Ptr cloud (new PointCloud);
     pcl::fromROSMsg(*msg, *cloud);
 
     // convert the pcl point cloud to an eigen matrix
@@ -305,7 +343,7 @@ void TslBag::PointCloudCallback(const PointCloudMsg::ConstPtr& msg)
     MatrixXf Y = tsl.step(X);
 
     // convert the eigen matrix to a pcl point cloud
-    PoinCloud::Ptr result_states (new PoinCloud);
+    PointCloud::Ptr result_states (new PointCloud);
     for (int i=0; i<Y.rows(); i++) {
         pcl::PointXYZ point;
         point.x = Y(i, 0);
@@ -332,7 +370,7 @@ Eigen::MatrixXf TslBag::GetSegmentedPoints(const cv::Mat& image, const cv::Mat& 
     // extract the segmented points from the depth image
     // convert the pixel coordinates to 3D points
     PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
-    // PoinCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
+    // PointCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
     
     // downsample the points
     PointCloud::Ptr cloud_filtered (new PointCloud);
@@ -346,7 +384,7 @@ Eigen::MatrixXf TslBag::GetSegmentedPoints(const cv::Mat& image, const cv::Mat& 
     return X;
 }
 
-cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg)
+cv::Mat TslBag::ImageToCvMat(const sensor_msgs::ImageConstPtr& msg)
 {
     cv_bridge::CvImagePtr cv_ptr;
     try {
@@ -358,7 +396,7 @@ cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg)
     return cv_ptr->image;
 }
 
-cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg)
+cv::Mat TslBag::DepthToCvMat(const sensor_msgs::ImageConstPtr& msg)
 {
     cv_bridge::CvImagePtr cv_ptr;
     try {

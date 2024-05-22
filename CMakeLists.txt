@@ -10,6 +10,8 @@ project(tsl)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  rosbag
+  tf
   std_msgs
   sensor_msgs
   geometry_msgs

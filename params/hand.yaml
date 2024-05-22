@@ -1,0 +1,22 @@
+camera: "rs_l515"
+camera_frame: "rs_l515_color_optical_frame"
+num_state_points: 25
+rgb_topic: "/rs_l515/color/image_raw"
+depth_topic: "/rs_l515/aligned_depth_to_color/image_raw"
+camera_info_topic: "/rs_l515/color/camera_info"
+eyelet_init_topic: "/eyelet_init"
+eyelet_pose_topic: "/eyelet_pose"
+aglet_pose_topic: "/aglet_pose"
+result_pc_topic: "/tsl/result_states"
+unity_adjust_service_: "/unity_adjust"
+unity_reset_service_: "/unity_reset"
+unity_predict_service_: "/unity_predict"
+
+robot_frame: "body_default"
+camera_frame: "rs_l515_color_optical_frame"
+result_frame: "rs_l515_color_optical_frame"
+bag_path: "/tsl_data/shoelacing_4_2_new.bag"
+bag_config_path: "/tsl_data/shoelacing_4_2.yaml"
+rope_length: 0.42
+rope_radius: 0.01
+cam_pose: [0, 0, 0, 0, 0, 0, 1]

@@ -1,7 +1,16 @@
-#ifndef TSL_TSL_BAG_H
-#define TSL_TSL_BAG_H
+#ifndef TSL_BAG_H
+#define TSL_BAG_H
 
 #include <ros/ros.h>
+#include <rosbag/bag.h>
+#include <rosbag/view.h>
+#include <rosbag/query.h>
+#include <rosbag/message_instance.h>
+#include <tf/transform_listener.h>
+#include <tf/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/static_transform_broadcaster.h>
+
 #include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
@@ -39,19 +48,27 @@ private:
     std::string camera_info_topic_;
     std::string unity_reset_service_;
     std::string unity_adjust_service_;
+    std::string unity_predict_service_;
     std::string robot_frame;
     std::string camera_frame;
     std::string bag_path;
     std::string bag_config_path;
+    std::string eyelet_topic_;
+    std::string eyelet_init_topic_;
+    std::string aglet_topic_;
+    std::string result_pc_topic_;
 
     // 
     int num_state_points;
     int num_messages;
     std::vector<float> cam_pose;
     cv::Point resolution;
+    float rope_length;
+    float rope_radius;
 
     ros::NodeHandle nh_;
     ros::Publisher result_states_pub_;
+    ros::Publisher aglet_pub_;
     ros::ServiceClient adjust_client;
     Tsl tsl;
 
@@ -83,4 +100,4 @@ public:
     void RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
 };
 
-#endif // TSL_TSL_BAG_H
+#endif // TSL_BAG_H
