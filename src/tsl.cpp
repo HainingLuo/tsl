@@ -48,7 +48,7 @@ void Tsl::CPD(const MatrixXf &X)
     // std::cout << "dis_yy: " << dis_yy << std::endl;
 
     // initialise gaussian variance sigma2
-    float sigma2 = dis_xy.mean() / D*M*N;
+    float sigma2 = dis_xy.sum() / D*M*N;
     std::cout << "sigma2 init: " << sigma2 << std::endl;
 
     // initialise gaussian kernel G

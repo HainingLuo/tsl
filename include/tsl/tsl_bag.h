@@ -34,6 +34,7 @@
 
 #include <tsl/gmm.h>
 #include "tsl/tsl.h"
+#include "tsl/util.h"
 
 using PointCloudMsg = sensor_msgs::PointCloud2;
 using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
@@ -65,6 +66,8 @@ private:
     cv::Point resolution;
     float rope_length;
     float rope_radius;
+    std::vector<int> skip_frames;
+    std::vector<float> aglet_1_position, aglet_2_position;
 
     ros::NodeHandle nh_;
     ros::Publisher result_states_pub_;
@@ -88,7 +91,8 @@ private:
 
     // functions
     Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth);
-    void ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg);
+    // void ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg);
+    void ProcessImage(cv::Mat& image);
     cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg);
     cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg);
     Eigen::MatrixXf GetSegmentedPoints(const cv::Mat& image, const cv::Mat& depth);

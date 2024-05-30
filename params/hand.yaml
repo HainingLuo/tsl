@@ -20,3 +20,12 @@ bag_config_path: "/tsl_data/shoelacing_4_2.yaml"
 rope_length: 0.42
 rope_radius: 0.01
 cam_pose: [0, 0, 0, 0, 0, 0, 1]
+skip_frames: [209,210,729,730]
+
+segmentation:
+  hue_min: 30
+  hue_max: 70
+  sat_min: 30
+  sat_max: 255
+  val_min: 70
+  val_max: 255

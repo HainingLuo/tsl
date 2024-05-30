@@ -25,15 +25,17 @@ public:
         return points3D;
     }
     
-    pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(const std::vector<cv::Point>& pixelCoordinates,
-                                                                  const cv::Mat& depthImage) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(
+        const std::vector<cv::Point>& pixelCoordinates,
+        const cv::Mat& depthImage) {
+
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud(new pcl::PointCloud<pcl::PointXYZ>);
 
         for (const auto& pixel : pixelCoordinates) {
             int x = pixel.x;
             int y = pixel.y;
 
-            double depth = depthImage.at<double>(y, x);
+            double depth = 0.001*depthImage.at<u_int16_t>(y, x);
             Eigen::Vector3d point3D = depthTo3D(x, y, depth);
 
             pcl::PointXYZ pclPoint;
@@ -43,7 +45,6 @@ public:
 
             pointCloud->push_back(pclPoint);
         }
-
         return pointCloud;
     }
 

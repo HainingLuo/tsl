@@ -24,6 +24,7 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/num_state_points", num_state_points);
     nh_.getParam("/tsl_bag/rope_length", rope_length);
     nh_.getParam("/tsl_bag/rope_radius", rope_radius);
+    nh_.getParam("/tsl_bag/skip_frames", skip_frames);
     // get segmentation parameters
     nh_.getParam("/tsl_bag/segmentation/hue_min", hue_min_);
     nh_.getParam("/tsl_bag/segmentation/hue_max", hue_max_);
@@ -132,13 +133,14 @@ TslBag::TslBag():
     std::vector<geometry_msgs::Pose> eyelet_poses;
     for (int i=0; i<config["eyelets_init"].size(); i++) {
         geometry_msgs::Pose pose;
-        pose.position.x = config["eyelets_init"][i][0].as<float>();
-        pose.position.y = config["eyelets_init"][i][1].as<float>();
-        pose.position.z = config["eyelets_init"][i][2].as<float>();
-        pose.orientation.x = config["eyelets_init"][i][3].as<float>();
-        pose.orientation.y = config["eyelets_init"][i][4].as<float>();
-        pose.orientation.z = config["eyelets_init"][i][5].as<float>();
-        pose.orientation.w = config["eyelets_init"][i][6].as<float>();
+        pose = vec2PoseMsg(config["eyelets_init"][i].as<std::vector<float>>());
+        // pose.position.x = config["eyelets_init"][i][0].as<float>();
+        // pose.position.y = config["eyelets_init"][i][1].as<float>();
+        // pose.position.z = config["eyelets_init"][i][2].as<float>();
+        // pose.orientation.x = config["eyelets_init"][i][3].as<float>();
+        // pose.orientation.y = config["eyelets_init"][i][4].as<float>();
+        // pose.orientation.z = config["eyelets_init"][i][5].as<float>();
+        // pose.orientation.w = config["eyelets_init"][i][6].as<float>();
         eyelet_poses.push_back(pose);
     }
     geometry_msgs::PoseArray eyelet_poses_msg;
@@ -147,12 +149,16 @@ TslBag::TslBag():
     // read the initial aglet poses
     geometry_msgs::PoseArray aglet_poses_msg;
     geometry_msgs::Pose aglet_1_pose, aglet_2_pose;
-    aglet_1_pose.position.x = config["aglet_1_init"][0].as<float>();
-    aglet_1_pose.position.y = config["aglet_1_init"][1].as<float>();
-    aglet_1_pose.position.z = config["aglet_1_init"][2].as<float>();    
-    aglet_2_pose.position.x = config["aglet_2_init"][0].as<float>();
-    aglet_2_pose.position.y = config["aglet_2_init"][1].as<float>();
-    aglet_2_pose.position.z = config["aglet_2_init"][2].as<float>();
+    aglet_1_position = config["aglet_1_init"].as<std::vector<float>>();
+    aglet_2_position = config["aglet_2_init"].as<std::vector<float>>();
+    aglet_1_pose.position = vec2PointMsg(aglet_1_position);
+    aglet_2_pose.position = vec2PointMsg(aglet_2_position);
+    // aglet_1_pose.position.x = config["aglet_1_init"][0].as<float>();
+    // aglet_1_pose.position.y = config["aglet_1_init"][1].as<float>();
+    // aglet_1_pose.position.z = config["aglet_1_init"][2].as<float>();    
+    // aglet_2_pose.position.x = config["aglet_2_init"][0].as<float>();
+    // aglet_2_pose.position.y = config["aglet_2_init"][1].as<float>();
+    // aglet_2_pose.position.z = config["aglet_2_init"][2].as<float>();
     aglet_poses_msg.header.frame_id = robot_frame;
     aglet_poses_msg.poses.push_back(aglet_1_pose);
     aglet_poses_msg.poses.push_back(aglet_2_pose);
@@ -174,6 +180,7 @@ TslBag::TslBag():
         pose.position.x = tsl.Y(i, 0);
         pose.position.y = tsl.Y(i, 1);
         pose.position.z = tsl.Y(i, 2);
+        // geometry_msgs::Pose pose = eigenVec2PoseMsg(tsl.Y.row(i));
         reset_srv.request.states_est.poses.push_back(pose);
     }
     reset_srv.request.rope_length.data = rope_length;
@@ -208,8 +215,112 @@ TslBag::TslBag():
     aglet_pub_.publish(aglet_poses_msg);
 
     ROS_INFO_STREAM("Tsl bag node initialised");
-    ros::spin();
+
+    // start the bag loop
+    // create a bag view for the rgb, depth and aglet topics
+    rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_, aglet_topic_}));
+    int count = 0;
+    bool new_action = false;
+    // create a dictionary to store the rgb, depth and aglet messages
+    std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
+    messages["rgb"] = nullptr;
+    messages["depth"] = nullptr;
+    // create a pose array message to store the aglet poses
+    std::vector<float> aglet_1_position_last_update = aglet_1_position;
+    std::vector<float> aglet_2_position_last_update = aglet_2_position;
+    // iterate through the messages
+    for (rosbag::MessageInstance const m : view) {
+        // check if count is in the skip frames
+        if (std::find(skip_frames.begin(), skip_frames.end(), count) != skip_frames.end()) {
+            count++;
+            continue;
+        }
+        else {
+            count++;
+        }
+        // process the message
+        if (m.getTopic() == rgb_topic_) {
+            messages["rgb"] = m.instantiate<sensor_msgs::Image>();
+        } else if (m.getTopic() == depth_topic_) {
+            messages["depth"] = m.instantiate<sensor_msgs::Image>();
+        } else if (m.getTopic() == aglet_topic_) {
+            geometry_msgs::PoseArray::ConstPtr aglet_msg = m.instantiate<geometry_msgs::PoseArray>();
+            if (aglet_msg->poses[0].position.x != 0.0) {
+                aglet_1_position = {aglet_msg->poses[0].position.x, 
+                                    aglet_msg->poses[0].position.y, 
+                                    aglet_msg->poses[0].position.z};
+                aglet_poses_msg.poses[0] = aglet_msg->poses[0];
+            }
+            if (aglet_msg->poses[1].position.x != 0.0) {
+                aglet_2_position = {aglet_msg->poses[1].position.x, 
+                                    aglet_msg->poses[1].position.y, 
+                                    aglet_msg->poses[1].position.z};
+                aglet_poses_msg.poses[1] = aglet_msg->poses[1];
+            }
+            // check if this is a new action
+            if (vecDist(aglet_1_position, aglet_1_position_last_update)>0.002 || 
+                vecDist(aglet_2_position, aglet_2_position_last_update)>0.002) 
+                new_action = true;
+            aglet_pub_.publish(aglet_poses_msg);
+        }
+        // check if we have both rgb and depth messages
+        if (messages["rgb"] != nullptr && messages["depth"] != nullptr) {
+            // check if this is a new action
+            if (new_action) {
+                // update the last action
+                aglet_1_position_last_update = aglet_1_position;
+                aglet_2_position_last_update = aglet_2_position;
+                // convert the rgb and depth messages to cv::Mat
+                cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
+                ProcessImage(rgb_img);
+                cv::Mat depth_img = DepthToCvMat(messages["depth"]);
+                // get the segmented points
+                Eigen::MatrixXf X = GetSegmentedPoints(rgb_img, depth_img);
+                // call the cpd algorithm
+                Eigen::MatrixXf Y = tsl.step(X);
+                // call unity adjust service
+                tsl::SimAdjust adjust_srv;
+                // convert the eigen matrix to a posearray message
+                for (int i=0; i<Y.rows(); i++) {
+                    geometry_msgs::Pose pose = eigenVec2PoseMsg(Y.row(i));
+                    adjust_srv.request.states_est.poses.push_back(pose);
+                }
+                // call the adjust service
+                if (adjust_client.call(adjust_srv)) {
+                    // save the states
+                    for (int i=0; i<adjust_srv.response.states_sim.poses.size(); i++) {
+                        tsl.Y(i, 0) = adjust_srv.response.states_sim.poses[i].position.x;
+                        tsl.Y(i, 1) = adjust_srv.response.states_sim.poses[i].position.y;
+                        tsl.Y(i, 2) = adjust_srv.response.states_sim.poses[i].position.z;
+                    }        
+                } else {
+                    ROS_ERROR("Failed to call service adjust");
+                }
+                // // publish result states
+                // PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
+                // pcl::PointCloud<pcl::PointXYZ> result_states;
+                // for (int i=0; i<Y.rows(); i++) {
+                //     pcl::PointXYZ point;
+                //     point.x = Y(i, 0);
+                //     point.y = Y(i, 1);
+                //     point.z = Y(i, 2);
+                //     result_states.push_back(point);
+                // }
+                // pcl::toROSMsg(result_states, *result_states_msg);
+                // result_states_msg->header.frame_id = result_frame_;
+                // result_states_pub_.publish(result_states_msg);
+                // reset for the next action
+                new_action = false;
+                messages["rgb"] = nullptr;
+                messages["depth"] = nullptr;
+            }
+        }
+
+    }
+    // ros::spin();
 }
+
+
 
 Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth)
 {
@@ -223,165 +334,52 @@ Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat&
     return Eigen::MatrixXf();
 }
 
-void TslBag::ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg)
+void TslBag::ProcessImage(cv::Mat& image)
 {
     // set region [270:270+154, 267:267+92, :] to zero
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return;
-    }
-    cv::Mat image = cv_ptr->image;
     cv::Mat roi = image(cv::Rect(267, 270, 92, 154));
-    roi = cv::Mat::zeros(roi.size(), roi.type());    
+    roi = cv::Mat::zeros(roi.size(), roi.type());
 }
 
-void TslBag::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, 
-                            const sensor_msgs::ImageConstPtr& depth_msg)
-{
-    // color segmentation of the rgb image
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return;
-    }
-    // cv::Mat mask = hsv_segmenter_.segmentImage(cv_ptr->image);
-    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(cv_ptr->image);
-
-    // extract the segmented points from the depth image
-    cv_bridge::CvImagePtr cv_depth_ptr;
-    try {
-        cv_depth_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_16UC1);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return;
-    }
-    
-    // // extract the non zero points from the mask
-    // std::vector<Eigen::Vector2i> pixelCoordinates;
-    // cv::findNonZero(mask, pixelCoordinates);
-
-    // convert the pixel coordinates to 3D points
-    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, cv_depth_ptr->image);
-    // PointCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
-        
-    // downsample the points
-    PointCloud::Ptr cloud_filtered (new PointCloud);
-    pcl::VoxelGrid<pcl::PointXYZ> sor;
-    sor.setInputCloud (points3D);
-    sor.setLeafSize (0.02f, 0.02f, 0.02f);
-    sor.filter (*cloud_filtered);
-    if (cloud_filtered->size() == 0) {
-        ROS_WARN("No points in the downsampled point cloud!");
-        return;
-    }
-
-    // convert the pcl point cloud to eigen matrix
-    Matrix3Xf X = cloud_filtered->getMatrixXfMap().topRows(3);    
-    
-    // call cpd function
-    tsl.step(X);
-
-    // call unity adjust service
-    tsl::SimAdjust adjust_srv;
-    // convert the eigen matrix to a posearray message
-    for (int i=0; i<tsl.Y.rows(); i++) {
-        geometry_msgs::Pose pose;
-        pose.position.x = tsl.Y(i, 0);
-        pose.position.y = tsl.Y(i, 1);
-        pose.position.z = tsl.Y(i, 2);
-        adjust_srv.request.states_est.poses.push_back(pose);
-    }
-    // call the adjust service
-    // TODO change the pose array to point cloud
-    if (adjust_client.call(adjust_srv)) {
-        // save the states
-        for (int i=0; i<adjust_srv.response.states_sim.poses.size(); i++) {
-            tsl.Y(i, 0) = adjust_srv.response.states_sim.poses[i].position.x;
-            tsl.Y(i, 1) = adjust_srv.response.states_sim.poses[i].position.y;
-            tsl.Y(i, 2) = adjust_srv.response.states_sim.poses[i].position.z;
-        }        
-    } else {
-        ROS_ERROR("Failed to call service adjust");
-    }
-
-    // publish result states
-    PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
-
-
-}
-
-void TslBag::PointCloudCallback(const PointCloudMsg::ConstPtr& msg)
-{
-    //// psuedo code
-    // get observation and action
-    // send action to simulation
-    // get simmulation predicted states
-    // call cpd with observation, action and simmulation predicted states
-    // get cpd predicted states back
-    // send cpd predicted states to simulation controller
-    // get simmulation states
-    // update states
-
-    // convert the point cloud message to a pcl point cloud
-    PointCloud::Ptr cloud (new PointCloud);
-    pcl::fromROSMsg(*msg, *cloud);
-
-    // convert the pcl point cloud to an eigen matrix
-    MatrixXf X(cloud->size(), 3);
-    for (int i=0; i<cloud->size(); i++) {
-        X(i, 0) = cloud->points[i].x;
-        X(i, 1) = cloud->points[i].y;
-        X(i, 2) = cloud->points[i].z;
-    }
-
-    // run the cpd algorithm
-    MatrixXf Y = tsl.step(X);
-
-    // convert the eigen matrix to a pcl point cloud
-    PointCloud::Ptr result_states (new PointCloud);
-    for (int i=0; i<Y.rows(); i++) {
-        pcl::PointXYZ point;
-        point.x = Y(i, 0);
-        point.y = Y(i, 1);
-        point.z = Y(i, 2);
-        result_states->push_back(point);
-    }
-
-    // convert the pcl point cloud to a point cloud message
-    PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
-    pcl::toROSMsg(*result_states, *result_states_msg);
-    result_states_msg->header.frame_id = result_frame_;
-
-    // publish the point cloud message
-    result_states_pub_.publish(result_states_msg);
-}
+// void TslBag::ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg)
+// {
+//     // set region [270:270+154, 267:267+92, :] to zero
+//     cv_bridge::CvImagePtr cv_ptr;
+//     try {
+//         cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
+//     } catch (cv_bridge::Exception& e) {
+//         ROS_ERROR("cv_bridge exception: %s", e.what());
+//         return;
+//     }
+//     cv::Mat image = cv_ptr->image;
+//     cv::Mat roi = image(cv::Rect(267, 270, 92, 154));
+//     roi = cv::Mat::zeros(roi.size(), roi.type());    
+// }
 
 Eigen::MatrixXf TslBag::GetSegmentedPoints(const cv::Mat& image, const cv::Mat& depth)
 {
     // color segmentation of the rgb image
-    cv::Mat mask = hsv_segmenter_.segmentImage(image);
     std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(image);
 
     // extract the segmented points from the depth image
-    // convert the pixel coordinates to 3D points
     PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
-    // PointCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
     
-    // downsample the points
-    PointCloud::Ptr cloud_filtered (new PointCloud);
-    pcl::VoxelGrid<pcl::PointXYZ> sor;
-    sor.setInputCloud (points3D);
-    sor.setLeafSize (0.02f, 0.02f, 0.02f);
-    sor.filter (*cloud_filtered);
+    // print the size of the 3D points
+    // std::cout << "Size of 3D points: " << points3D->size() << std::endl;
 
-    // convert the pcl point cloud to eigen matrix
+    // downsample the points
+    PointCloud::Ptr cloud_filtered(new PointCloud);
+    pcl::VoxelGrid<pcl::PointXYZ> sor;
+    sor.setInputCloud(points3D);
+    sor.setLeafSize(0.02f, 0.02f, 0.02f);
+    sor.filter(*cloud_filtered);
+
+    // print the size of the downsampled points
+    // std::cout << "Size of downsampled points: " << cloud_filtered->size() << std::endl;
+
+    // convert the pcl point cloud to eigen matrix with 3 columns
     Eigen::MatrixXf X = cloud_filtered->getMatrixXfMap().topRows(3);
-    return X;
+    return X.transpose();
 }
 
 cv::Mat TslBag::ImageToCvMat(const sensor_msgs::ImageConstPtr& msg)
