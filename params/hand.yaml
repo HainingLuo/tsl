@@ -1,3 +1,4 @@
+visualisation: true
 camera: "rs_l515"
 camera_frame: "rs_l515_color_optical_frame"
 num_state_points: 25

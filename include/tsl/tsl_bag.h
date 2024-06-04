@@ -60,6 +60,7 @@ private:
     std::string result_pc_topic_;
 
     // 
+    bool viusalisation;
     int num_state_points;
     int num_messages;
     std::vector<float> cam_pose;
@@ -95,7 +96,7 @@ private:
     void ProcessImage(cv::Mat& image);
     cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg);
     cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg);
-    Eigen::MatrixXf GetSegmentedPoints(const cv::Mat& image, const cv::Mat& depth);
+    Eigen::MatrixXf Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth);
 
 public:
     TslBag();

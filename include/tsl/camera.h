@@ -36,6 +36,10 @@ public:
             int y = pixel.y;
 
             double depth = 0.001*depthImage.at<u_int16_t>(y, x);
+            // remove nan and zero depth values
+            if (depth == 0 || std::isnan(depth)) {
+                continue;
+            }
             Eigen::Vector3d point3D = depthTo3D(x, y, depth);
 
             pcl::PointXYZ pclPoint;

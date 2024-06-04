@@ -25,6 +25,7 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/rope_length", rope_length);
     nh_.getParam("/tsl_bag/rope_radius", rope_radius);
     nh_.getParam("/tsl_bag/skip_frames", skip_frames);
+    nh_.getParam("/tsl_bag/visualisation", viusalisation);
     // get segmentation parameters
     nh_.getParam("/tsl_bag/segmentation/hue_min", hue_min_);
     nh_.getParam("/tsl_bag/segmentation/hue_max", hue_max_);
@@ -274,15 +275,21 @@ TslBag::TslBag():
                 cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
                 ProcessImage(rgb_img);
                 cv::Mat depth_img = DepthToCvMat(messages["depth"]);
+                // color segmentation of the rgb image
+                std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(rgb_img);
                 // get the segmented points
-                Eigen::MatrixXf X = GetSegmentedPoints(rgb_img, depth_img);
+                Eigen::MatrixXf X = Retrieve3dPoints(pixelCoordinates, depth_img);
                 // call the cpd algorithm
                 Eigen::MatrixXf Y = tsl.step(X);
                 // call unity adjust service
                 tsl::SimAdjust adjust_srv;
                 // convert the eigen matrix to a posearray message
                 for (int i=0; i<Y.rows(); i++) {
-                    geometry_msgs::Pose pose = eigenVec2PoseMsg(Y.row(i));
+                    geometry_msgs::Pose pose;
+                    pose.position.x = tsl.Y(i, 0);
+                    pose.position.y = tsl.Y(i, 1);
+                    pose.position.z = tsl.Y(i, 2);
+                    // geometry_msgs::Pose pose = eigenVec2PoseMsg(Y.row(i));
                     adjust_srv.request.states_est.poses.push_back(pose);
                 }
                 // call the adjust service
@@ -313,8 +320,25 @@ TslBag::TslBag():
                 new_action = false;
                 messages["rgb"] = nullptr;
                 messages["depth"] = nullptr;
+
+                // // visualise the states with opencv
+                // if (viusalisation) {
+                //     // cv::imshow("rgb", rgb_img);
+                //     // create a blank image
+                //     cv::Mat image = cv::Mat::zeros(resolution.y, resolution.x, CV_8UC3);
+                //     // draw the pixelCoordinates on the image
+                //     for (int i=0; i<pixelCoordinates.size(); i++) {
+                //         cv::circle(image, pixelCoordinates[i], 1, cv::Scalar(0, 255, 0), -1);
+                //     }
+                //     // concatenate the rgb and image
+                //     cv::Mat concat_img;
+                //     cv::hconcat(rgb_img, image, concat_img);
+                //     cv::imshow("result", concat_img);
+                //     cv::waitKey(1);
+                // }
             }
         }
+        
 
     }
     // ros::spin();
@@ -325,7 +349,7 @@ TslBag::TslBag():
 Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth)
 {
     // // get the segmented points
-    // Eigen::MatrixXf X = GetSegmentedPoints(init_img, init_depth);
+    // Eigen::MatrixXf X = Retrieve3dPoints(init_img, init_depth);
     // // apply gaussian mixture model to the points
     // GaussianMixtureModel gmm = GaussianMixtureModel(num_state_points, maxIterations=10000);
     // gmm.fit(X);
@@ -356,11 +380,8 @@ void TslBag::ProcessImage(cv::Mat& image)
 //     roi = cv::Mat::zeros(roi.size(), roi.type());    
 // }
 
-Eigen::MatrixXf TslBag::GetSegmentedPoints(const cv::Mat& image, const cv::Mat& depth)
+Eigen::MatrixXf TslBag::Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
 {
-    // color segmentation of the rgb image
-    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(image);
-
     // extract the segmented points from the depth image
     PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
     
@@ -375,7 +396,7 @@ Eigen::MatrixXf TslBag::GetSegmentedPoints(const cv::Mat& image, const cv::Mat& 
     sor.filter(*cloud_filtered);
 
     // print the size of the downsampled points
-    // std::cout << "Size of downsampled points: " << cloud_filtered->size() << std::endl;
+    // std::cout << "Size of downsampled points: " << cloud_filtered->size() << std::endl; 
 
     // convert the pcl point cloud to eigen matrix with 3 columns
     Eigen::MatrixXf X = cloud_filtered->getMatrixXfMap().topRows(3);
