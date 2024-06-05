@@ -26,6 +26,14 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/rope_radius", rope_radius);
     nh_.getParam("/tsl_bag/skip_frames", skip_frames);
     nh_.getParam("/tsl_bag/visualisation", viusalisation);
+    // cpd parameters
+    nh_.getParam("/tsl_bag/alpha", tsl.alpha);
+    nh_.getParam("/tsl_bag/beta", tsl.beta);
+    nh_.getParam("/tsl_bag/gamma", tsl.gamma);
+    nh_.getParam("/tsl_bag/tolerance", tsl.tolerance);
+    nh_.getParam("/tsl_bag/max_iter", tsl.max_iter);
+    nh_.getParam("/tsl_bag/mu", tsl.mu);
+    nh_.getParam("/tsl_bag/k", tsl.k);
     // get segmentation parameters
     nh_.getParam("/tsl_bag/segmentation/hue_min", hue_min_);
     nh_.getParam("/tsl_bag/segmentation/hue_max", hue_max_);
@@ -33,9 +41,18 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/segmentation/sat_max", sat_max_);
     nh_.getParam("/tsl_bag/segmentation/val_min", val_min_);
     nh_.getParam("/tsl_bag/segmentation/val_max", val_max_);
+    // get plot parameters
+    nh_.getParam("/tsl_bag/plot/use_plot", use_plot_);
+    nh_.getParam("/tsl_bag/plot/plot_topic", plot_topic_);
+    nh_.getParam("/tsl_bag/plot/x_min", plot_x_min_);
+    nh_.getParam("/tsl_bag/plot/x_max", plot_x_max_);
+    nh_.getParam("/tsl_bag/plot/y_min", plot_y_min_);
+    nh_.getParam("/tsl_bag/plot/y_max", plot_y_max_);
 
 
     // initialise publishers
+    result_img_pub_ = nh_.advertise<sensor_msgs::Image>(plot_topic_, 10);
+    segmented_pc_pub_ = nh_.advertise<PointCloudMsg>("/tsl/segmented_pc", 10);
     result_states_pub_ = nh_.advertise<PointCloudMsg>(result_pc_topic_, 10);
     ros::Publisher aglet_pub_ = nh_.advertise<geometry_msgs::PoseArray>(aglet_topic_, 10);
     ros::Publisher eyelet_init_pub = nh_.advertise<geometry_msgs::PoseArray>(eyelet_init_topic_, 10);
@@ -104,25 +121,12 @@ TslBag::TslBag():
     rosbag::MessageInstance const n = *it;
     sensor_msgs::Image::ConstPtr depth_msg = n.instantiate<sensor_msgs::Image>();
     cv::Mat init_depth = DepthToCvMat(depth_msg);
-
-    // // synchronised subscribers for rgb and depth images
-    // message_filters::Subscriber<sensor_msgs::Image> rgb_sub(nh_, rgb_topic_, 1);
-    // message_filters::Subscriber<sensor_msgs::Image> depth_sub(nh_, depth_topic_, 1);
-    // // message_filters::Subscriber<sensor_msgs::CameraInfo> info_sub(nh_, camera_info_topic_, 1);
-    // // typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
-    // //                                     sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
-    // // message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub, info_sub);
-    // // sync.registerCallback(boost::bind(&TslBag::RGBDCallback, this, _1, _2, _3));
-    // typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
-    //                                     sensor_msgs::Image> MySyncPolicy;
-    // message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub);
-    // sync.registerCallback(boost::bind(&TslBag::RGBDCallback, this, _1, _2));
     
     // initialise the image segmentation
     hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
     
     // initialise the tsl class
-    tsl = Tsl();
+    // tsl = Tsl();
 
     // initialise the states
     // tsl.Y = InitialiseStates(init_img, init_depth);
@@ -135,13 +139,6 @@ TslBag::TslBag():
     for (int i=0; i<config["eyelets_init"].size(); i++) {
         geometry_msgs::Pose pose;
         pose = vec2PoseMsg(config["eyelets_init"][i].as<std::vector<float>>());
-        // pose.position.x = config["eyelets_init"][i][0].as<float>();
-        // pose.position.y = config["eyelets_init"][i][1].as<float>();
-        // pose.position.z = config["eyelets_init"][i][2].as<float>();
-        // pose.orientation.x = config["eyelets_init"][i][3].as<float>();
-        // pose.orientation.y = config["eyelets_init"][i][4].as<float>();
-        // pose.orientation.z = config["eyelets_init"][i][5].as<float>();
-        // pose.orientation.w = config["eyelets_init"][i][6].as<float>();
         eyelet_poses.push_back(pose);
     }
     geometry_msgs::PoseArray eyelet_poses_msg;
@@ -154,12 +151,6 @@ TslBag::TslBag():
     aglet_2_position = config["aglet_2_init"].as<std::vector<float>>();
     aglet_1_pose.position = vec2PointMsg(aglet_1_position);
     aglet_2_pose.position = vec2PointMsg(aglet_2_position);
-    // aglet_1_pose.position.x = config["aglet_1_init"][0].as<float>();
-    // aglet_1_pose.position.y = config["aglet_1_init"][1].as<float>();
-    // aglet_1_pose.position.z = config["aglet_1_init"][2].as<float>();    
-    // aglet_2_pose.position.x = config["aglet_2_init"][0].as<float>();
-    // aglet_2_pose.position.y = config["aglet_2_init"][1].as<float>();
-    // aglet_2_pose.position.z = config["aglet_2_init"][2].as<float>();
     aglet_poses_msg.header.frame_id = robot_frame;
     aglet_poses_msg.poses.push_back(aglet_1_pose);
     aglet_poses_msg.poses.push_back(aglet_2_pose);
@@ -221,6 +212,8 @@ TslBag::TslBag():
     // create a bag view for the rgb, depth and aglet topics
     rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_, aglet_topic_}));
     int count = 0;
+    int key_frame_count = 0;
+    float frame_time = 0.0;
     bool new_action = false;
     // create a dictionary to store the rgb, depth and aglet messages
     std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
@@ -268,6 +261,9 @@ TslBag::TslBag():
         if (messages["rgb"] != nullptr && messages["depth"] != nullptr) {
             // check if this is a new action
             if (new_action) {
+                // time the procedure
+                auto start = std::chrono::high_resolution_clock::now();
+
                 // update the last action
                 aglet_1_position_last_update = aglet_1_position;
                 aglet_2_position_last_update = aglet_2_position;
@@ -281,6 +277,12 @@ TslBag::TslBag():
                 Eigen::MatrixXf X = Retrieve3dPoints(pixelCoordinates, depth_img);
                 // call the cpd algorithm
                 Eigen::MatrixXf Y = tsl.step(X);
+
+                // print time taken
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> elapsed = end - start;
+                ROS_INFO_STREAM("Frame " << count << " CPD took " << elapsed.count() << " seconds");
+
                 // call unity adjust service
                 tsl::SimAdjust adjust_srv;
                 // convert the eigen matrix to a posearray message
@@ -303,45 +305,73 @@ TslBag::TslBag():
                 } else {
                     ROS_ERROR("Failed to call service adjust");
                 }
-                // // publish result states
-                // PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
-                // pcl::PointCloud<pcl::PointXYZ> result_states;
-                // for (int i=0; i<Y.rows(); i++) {
-                //     pcl::PointXYZ point;
-                //     point.x = Y(i, 0);
-                //     point.y = Y(i, 1);
-                //     point.z = Y(i, 2);
-                //     result_states.push_back(point);
-                // }
-                // pcl::toROSMsg(result_states, *result_states_msg);
-                // result_states_msg->header.frame_id = result_frame_;
-                // result_states_pub_.publish(result_states_msg);
                 // reset for the next action
                 new_action = false;
                 messages["rgb"] = nullptr;
                 messages["depth"] = nullptr;
+                key_frame_count++;
 
-                // // visualise the states with opencv
-                // if (viusalisation) {
-                //     // cv::imshow("rgb", rgb_img);
-                //     // create a blank image
-                //     cv::Mat image = cv::Mat::zeros(resolution.y, resolution.x, CV_8UC3);
-                //     // draw the pixelCoordinates on the image
-                //     for (int i=0; i<pixelCoordinates.size(); i++) {
-                //         cv::circle(image, pixelCoordinates[i], 1, cv::Scalar(0, 255, 0), -1);
-                //     }
-                //     // concatenate the rgb and image
-                //     cv::Mat concat_img;
-                //     cv::hconcat(rgb_img, image, concat_img);
-                //     cv::imshow("result", concat_img);
-                //     cv::waitKey(1);
-                // }
+                end = std::chrono::high_resolution_clock::now();
+                elapsed = end - start;
+                frame_time += elapsed.count();
+                ROS_INFO_STREAM("Frame " << count << " took " << elapsed.count() << " seconds");
+
+                // visualise the states with opencv
+                if (use_plot_) {
+                    // cv::imshow("rgb", rgb_img);
+                    // create a blank image
+                    cv::Mat image = cv::Mat::zeros(resolution.y, resolution.x, CV_8UC3);
+                    // draw the states on the image
+                    for (int i=0; i<Y.rows(); i++) {
+                        // rescale the tsl.Y from plot_x_min_ to plot_x_max_ to 0 to resolution.x
+                        float x = (Y(i, 0)-plot_x_min_)/(plot_x_max_-plot_x_min_)*resolution.x;
+                        float y = (Y(i, 1)-plot_y_min_)/(plot_y_max_-plot_y_min_)*resolution.y;
+                        cv::circle(image, cv::Point((int) x, (int) y), 1, cv::Scalar(0, 255, 0), -1);
+                    }
+                    // concatenate the rgb and image
+                    cv::Mat concat_img;
+                    cv::hconcat(rgb_img, image, concat_img);
+                    // publish the result image to result_img_pub_
+                    sensor_msgs::ImagePtr result_img_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", concat_img).toImageMsg();
+                    result_img_pub_.publish(result_img_msg);
+                    
+                    // cv::imshow("result", concat_img);
+                    // cv::waitKey(1);
+                }
+
+                // publish X for debug
+                PointCloudMsg::Ptr X_msg (new PointCloudMsg);
+                pcl::PointCloud<pcl::PointXYZ> X_cloud;
+                for (int i=0; i<X.rows(); i++) {
+                    pcl::PointXYZ point;
+                    point.x = X(i, 0);
+                    point.y = X(i, 1);
+                    point.z = X(i, 2);
+                    X_cloud.push_back(point);
+                }
+                pcl::toROSMsg(X_cloud, *X_msg);
+                X_msg->header.frame_id = result_frame_;
+                segmented_pc_pub_.publish(X_msg);
+
+                // publish the result states
+                PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
+                pcl::PointCloud<pcl::PointXYZ> result_states;
+                for (int i=0; i<Y.rows(); i++) {
+                    pcl::PointXYZ point;
+                    point.x = Y(i, 0);
+                    point.y = Y(i, 1);
+                    point.z = Y(i, 2);
+                    result_states.push_back(point);
+                }
+                pcl::toROSMsg(result_states, *result_states_msg);
+                result_states_msg->header.frame_id = result_frame_;
+                result_states_pub_.publish(result_states_msg);
             }
         }
-        
-
     }
-    // ros::spin();
+    // print the average frame time
+    ROS_INFO_STREAM("Average frame time: " << frame_time/count);
+    ROS_INFO_STREAM("Average key frame time: " << frame_time/key_frame_count);
 }
 
 

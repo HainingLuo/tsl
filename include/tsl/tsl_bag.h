@@ -71,6 +71,8 @@ private:
     std::vector<float> aglet_1_position, aglet_2_position;
 
     ros::NodeHandle nh_;
+    ros::Publisher result_img_pub_;
+    ros::Publisher segmented_pc_pub_;
     ros::Publisher result_states_pub_;
     ros::Publisher aglet_pub_;
     ros::ServiceClient adjust_client;
@@ -86,6 +88,14 @@ private:
     int sat_max_;
     int val_min_;
     int val_max_;
+
+    // plot parameters
+    bool use_plot_;
+    std::string plot_topic_;
+    float plot_x_min_;
+    float plot_x_max_;
+    float plot_y_min_;
+    float plot_y_max_;
     
     // segmenter
     ImageSegmenter hsv_segmenter_;

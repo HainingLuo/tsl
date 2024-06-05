@@ -2,10 +2,17 @@
 
 #include "tsl/tsl.h"
 
-Tsl::Tsl(/* args */)
-{
-    std::cout << "Tsl class initialised" << std::endl;
-}
+// Tsl::Tsl(float alpha, float beta, float gamma, float tolerance, int max_iter, double mu, int k)
+// {
+//     this->alpha = alpha;
+//     this->beta = beta;
+//     this->gamma = gamma;
+//     this->tolerance = tolerance;
+//     this->max_iter = max_iter;
+//     this->mu = mu;
+//     this->k = k;
+//     std::cout << "Tsl class initialised" << std::endl;
+// }
 
 void Tsl::CPD(const MatrixXf &X)
 {
@@ -14,14 +21,14 @@ void Tsl::CPD(const MatrixXf &X)
     // returns: (M x 3) list of points after cpd
 
     // PARAMS: should be ros params
-    float beta = 1.0; // gaussian kernel width
-    float gamma = 1.0; // weight of the LLE error
-    float alpha = 0.5; // weight of the CPD error
+    float beta = 0.5; // gaussian kernel width
+    float gamma = 1.2; //1.0; // weight of the LLE error
+    float alpha = 1.0; // 0.5; // weight of the CPD error
     float tolerance = 1e-4; // tolerance for convergence
     // float tolerance = 0.0002; // tolerance for convergence
-    max_iter = 50; // maximum number of iterations
+    max_iter = 100; // 50; // maximum number of iterations
     mu = 0.1; // outlier weight
-    int k = 6; // number of nearest neighbours
+    int k = 8; // number of nearest neighbours // 6 
 
     int N = X.rows();
     int M = Y.rows();
@@ -48,14 +55,16 @@ void Tsl::CPD(const MatrixXf &X)
     // std::cout << "dis_yy: " << dis_yy << std::endl;
 
     // initialise gaussian variance sigma2
-    float sigma2 = dis_xy.sum() / D*M*N;
-    std::cout << "sigma2 init: " << sigma2 << std::endl;
+    float sigma2 = dis_xy.sum() / (D*M*N);
+    // std::cout << "sigma2 init: " << sigma2 << std::endl;
 
     // initialise gaussian kernel G
     // MatrixXf G(M, M);
     MatrixXf G = (-dis_yy / (2 * beta * beta)).array().exp();
 
     // initialise LLE matrix L
+    // From https://cs.nyu.edu/~roweis/lle/algorithm.html
+    float regulation_term = 1e-3;
     MatrixXf L = MatrixXf::Zero(M, M);
     // MatrixXf W = MatrixXf::Zero(M, k);
     for (int i=0; i<M; i++) {
@@ -73,7 +82,10 @@ void Tsl::CPD(const MatrixXf &X)
         }
 
         MatrixXf C = Z * Z.transpose();
-        // TODO: cdcpd has a regulation term here
+        // add regulation term
+        if (G.trace() > 0) {
+            C.diagonal().array() += regulation_term * G.trace();
+        } 
         VectorXf w = C.llt().solve(VectorXf::Ones(k));
         // L.row(i) = w/w.sum();
         for (int j=0; j<k; j++) {
@@ -84,7 +96,7 @@ void Tsl::CPD(const MatrixXf &X)
     // M_mat.diagonal().array() += 1;
 
     // initialise LLE matrix H (M x M)
-    MatrixXf H = (MatrixXf::Identity(M, M) - L).transpose() * (MatrixXf::Identity(M, M) - L); // from trackdlo
+    MatrixXf H = (MatrixXf::Identity(M, M) - L).transpose() * (MatrixXf::Identity(M, M) - L);
     // std::cout << "H: " << H << std::endl;
 
     // start iterations
@@ -107,33 +119,40 @@ void Tsl::CPD(const MatrixXf &X)
         // std::cout << "P: " << P << std::endl;
 
         // M-step: estimate transformation
-        VectorXf Pt1 = P.colwise().sum();
-        VectorXf P1 = P.rowwise().sum();
+        VectorXf Pt1 = P.colwise().sum(); // Pt1 (N)
+        VectorXf P1 = P.rowwise().sum(); // P1 (M)
         float Np = P1.sum();
-        MatrixXf PX = P * X;
+        MatrixXf PX = P * X; // PX (M x D)
 
         MatrixXf p1d = P1.asDiagonal();
 
-        MatrixXf A = (P1.asDiagonal() * G) + alpha * sigma2 * MatrixXf::Identity(M, M) + sigma2 * gamma * (H * G);
+        // A (M x M)
+        MatrixXf A = (P1.asDiagonal() * G) + alpha * sigma2 * MatrixXf::Identity(M, M) + sigma2 * gamma * (H * G) + 10*G;
+        // MatrixXf A = (P1.asDiagonal() * G) + alpha * sigma2 * MatrixXf::Identity(M, M) + sigma2 * gamma * (H * G);
 
-        MatrixXf B =
-            PX - (p1d + sigma2 * gamma * H) * Y_prev;
+        // B (M x D)
+        MatrixXf B = PX - (p1d + sigma2 * gamma * H) * Y_prev;
 
-        MatrixXf W = (A).householderQr().solve(B);
+        MatrixXf W = (A).householderQr().solve(B); // W (M x D)
         // std::cout << "W: " << W << std::endl;
 
-        MatrixXf Y_new = Y_prev + G * W;
+        MatrixXf Y_new = Y_prev + G * W; // Y_new (M x D)
         // std::cout << "Y_new: " << Y_new << std::endl;
 
         // update sigma2
-        float trXtdPt1X = (X.transpose() * Pt1.asDiagonal() * X).trace();
-        float trPXtT = (PX.transpose() * Y_new).trace();
-        float trTtdP1T = (Y_new.transpose() * P1.asDiagonal() * Y_new).trace();
-        std::cout << "trXtdPt1X: " << trXtdPt1X << std::endl;
-        std::cout << "trPXtT: " << trPXtT << std::endl;
-        std::cout << "trTtdP1T: " << trTtdP1T << std::endl;
+        // float trXtdPt1X = (X.transpose() * Pt1.asDiagonal() * X).trace();
+        // float trPXtT = (PX.transpose() * Y_new).trace();
+        // float trTtdP1T = (Y_new.transpose() * P1.asDiagonal() * Y_new).trace();
+        Eigen::VectorXf xPxtemp = (X.array()*X.array()).rowwise().sum();
+        double trXtdPt1X = Pt1.dot(xPxtemp);
+        // std::cout << "trXtdPt1X: " << trXtdPt1X << std::endl;
+        Eigen::VectorXf yPytemp = (Y_new.array()*Y_new.array()).rowwise().sum();
+        double trTtdP1T = P1.dot(yPytemp);
+        // std::cout << "trTtdP1T: " << trTtdP1T << std::endl;
+        double trPXtT = (Y_new.transpose() * PX).trace();
+        // std::cout << "trPXtT: " << trPXtT << std::endl;
         sigma2 = (trXtdPt1X - 2*trPXtT + trTtdP1T) / (Np * D);
-        std::cout << "sigma2: " << sigma2 << std::endl;
+        // std::cout << "sigma2: " << sigma2 << std::endl;
 
         // if (sigma2 <= 0) {
         // sigma2 = tolerance / 10;
@@ -141,17 +160,17 @@ void Tsl::CPD(const MatrixXf &X)
 
         // check for convergence
         float dis = (Y_new - Y).rowwise().norm().sum()/M;
-        std::cout << "dis: " << dis << std::endl;
+        // std::cout << "dis: " << dis << std::endl;
         Y = Y_new;
         if (std::abs(sigma2 - sigma2_prev)<tolerance)
         // if (dis < tolerance)
         {
             converged = true;
-            std::cout << "Converged after " << i << " iterations" << std::endl;
+            // std::cout << "Converged after " << i << " iterations" << std::endl;
             return;
         }
     }
-    std::cout << "Finished without convergence" << std::endl;
+    // std::cout << "Finished without convergence" << std::endl;
 }
 
 MatrixXf Tsl::step(const MatrixXf &X)
@@ -159,6 +178,7 @@ MatrixXf Tsl::step(const MatrixXf &X)
     // X: (N x 3) list of downsampled point cloud points
     // Y: (M x 3) list of control points
     // returns: (M x 3) list of points after cpd
+
     // check if Y is empty
     if (Y.rows() == 0) {
         std::cout << "Y is empty" << std::endl;
