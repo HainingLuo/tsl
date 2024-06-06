@@ -13,6 +13,10 @@ public:
 
     Eigen::MatrixXf convertPixelsTo3D(const std::vector<Eigen::Vector2i>& pixelCoordinates,
                                       const cv::Mat& depthImage) {
+        /*
+        Convert a list of pixel coordinates to 3D points.
+        Pixels are assumed to be in the format (u, v) where u is the column index and v is the row index.
+        */
         Eigen::MatrixXf points3D(pixelCoordinates.size(), 3);
         for (int i = 0; i < pixelCoordinates.size(); i++) {
             int x = pixelCoordinates[i].x();
@@ -26,6 +30,10 @@ public:
     }
     
     pcl::PointCloud<pcl::PointXYZ>::Ptr convertPixelsToPointCloud(
+        /*
+        Convert a list of pixel coordinates to a point cloud.
+        Pixels are assumed to be in the format (u, v) where u is the column index and v is the row index.
+        */
         const std::vector<cv::Point>& pixelCoordinates,
         const cv::Mat& depthImage) {
 

@@ -49,6 +49,8 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/plot/y_min", plot_y_min_);
     nh_.getParam("/tsl_bag/plot/y_max", plot_y_max_);
 
+    // get the package path
+    pkg_path_ = ros::package::getPath("tsl");
 
     // initialise publishers
     result_img_pub_ = nh_.advertise<sensor_msgs::Image>(plot_topic_, 10);
@@ -129,7 +131,10 @@ TslBag::TslBag():
     // tsl = Tsl();
 
     // initialise the states
-    // tsl.Y = InitialiseStates(init_img, init_depth);
+    ProcessImage(init_img);
+    std::string init_method;
+    nh_.getParam("/tsl_bag/init_method", init_method);
+    tsl.Y = InitialiseStates(init_img, init_depth, init_method);
 
     // read bag_config_path yaml file
     YAML::Node config = YAML::LoadFile(bag_config_path);
@@ -154,14 +159,14 @@ TslBag::TslBag():
     aglet_poses_msg.header.frame_id = robot_frame;
     aglet_poses_msg.poses.push_back(aglet_1_pose);
     aglet_poses_msg.poses.push_back(aglet_2_pose);
-    // read the initial states
-    Eigen::MatrixXf initial_states(config["states_init"].size(), 3);
-    for (int i=0; i<config["states_init"].size(); i++) {
-        initial_states.row(i) << config["states_init"][i][0].as<float>(),
-                                 config["states_init"][i][1].as<float>(),
-                                 config["states_init"][i][2].as<float>();
-    }
-    tsl.Y = initial_states;
+    // // read the initial states
+    // Eigen::MatrixXf initial_states(config["states_init"].size(), 3);
+    // for (int i=0; i<config["states_init"].size(); i++) {
+    //     initial_states.row(i) << config["states_init"][i][0].as<float>(),
+    //                              config["states_init"][i][1].as<float>(),
+    //                              config["states_init"][i][2].as<float>();
+    // }
+    // tsl.Y = initial_states;
 
     // reset the simulation
     ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>(unity_reset_service_);
@@ -207,6 +212,11 @@ TslBag::TslBag():
     aglet_pub_.publish(aglet_poses_msg);
 
     ROS_INFO_STREAM("Tsl bag node initialised");
+
+    // stop and exit
+    bag.close();
+    ROS_INFO_STREAM("Closed bag: " + bag_path);
+    return;
 
     // start the bag loop
     // create a bag view for the rgb, depth and aglet topics
@@ -274,7 +284,7 @@ TslBag::TslBag():
                 // color segmentation of the rgb image
                 std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(rgb_img);
                 // get the segmented points
-                Eigen::MatrixXf X = Retrieve3dPoints(pixelCoordinates, depth_img);
+                Eigen::MatrixXf X = Retrieve3dPointsDownSampled(pixelCoordinates, depth_img);
                 // call the cpd algorithm
                 Eigen::MatrixXf Y = tsl.step(X);
 
@@ -376,16 +386,76 @@ TslBag::TslBag():
 
 
 
-Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth)
+Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth, const std::string method)
 {
-    // // get the segmented points
-    // Eigen::MatrixXf X = Retrieve3dPoints(init_img, init_depth);
-    // // apply gaussian mixture model to the points
-    // GaussianMixtureModel gmm = GaussianMixtureModel(num_state_points, maxIterations=10000);
-    // gmm.fit(X);
-    // // get the states from the gmm
-    // return gmm.getMeans();
-    return Eigen::MatrixXf();
+    // Initialize the Python interpreter
+    py::scoped_interpreter guard{};
+    py::module sys = py::module::import("sys");
+    sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
+    // Import the Python module
+    py::module module = py::module::import("estimate_initial_states");
+
+    // get the segmented points
+    cv::Mat mask = hsv_segmenter_.segmentImage(init_img);
+    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.findNonZero(mask);
+    // Convert num_state_points to a Python variable
+    py::int_ num_state_points_var(num_state_points);
+
+    py::object result;
+    // Call the Python function and pass the NumPy array and num_state_points as arguments
+    if (method == "GeneticAlgorithm") {
+        // get the 3D points
+        Eigen::MatrixXf X = Retrieve3dPointsDownSampled(pixelCoordinates, init_depth);
+        // Convert Eigen::MatrixXf to NumPy array
+        Eigen::MatrixXf X_transposed = X.transpose();
+        py::array np_array({X.rows(), X.cols()}, X_transposed.data());
+        result = module.attr("estimate_initial_states_ga")(np_array, num_state_points_var);
+    }
+    else if (method == "SkeletonInterpolation") {
+        // convert the mask to a NumPy array
+        py::array_t<uint8_t> np_array({mask.rows, mask.cols, mask.channels()}, mask.data);
+        // get the 3D coordinates of all the pixels
+        std::vector<cv::Point> all_pixelCoordinates;
+        for (int i=0; i<mask.rows; i++) {
+            for (int j=0; j<mask.cols; j++) {
+                all_pixelCoordinates.push_back(cv::Point(j, i));
+            }
+        }
+        // get the 3D points
+        Eigen::MatrixXf coordinates3D = Retrieve3dPoints(all_pixelCoordinates, init_depth);
+        // convert the 3D coordinates to a NumPy array
+        Eigen::MatrixXf coordinates3D_transposed = coordinates3D.transpose();
+        py::array np_array_3d({coordinates3D.rows(), coordinates3D.cols()}, coordinates3D_transposed.data());
+        // // Convert the pixel coordinates to an Eigen matrix
+        // Eigen::MatrixXf pixelCoordinatesMat(pixelCoordinates.size(), 2);
+        // for (int i=0; i<pixelCoordinates.size(); i++) {
+        //     pixelCoordinatesMat(i, 0) = pixelCoordinates[i].x;
+        //     pixelCoordinatesMat(i, 1) = pixelCoordinates[i].y;
+        // }
+        // // Convert Eigen::MatrixXf to NumPy array
+        // Eigen::MatrixXf pixelCoordinatesMat_transposed = pixelCoordinatesMat.transpose();
+        // py::array np_array({pixelCoordinatesMat.rows(), pixelCoordinatesMat.cols()}, pixelCoordinatesMat_transposed.data());
+        // // get the 3D points
+        // Eigen::MatrixXf X = Retrieve3dPoints(pixelCoordinates, init_depth);
+        // // Convert Eigen::MatrixXf to NumPy array
+        // Eigen::MatrixXf X_transposed = X.transpose();
+        // py::array np_array_3d({X.rows(), X.cols()}, X_transposed.data());
+        result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, num_state_points_var);
+    }
+    else {
+        // print error
+        std::cerr << "Invalid method: " << method << std::endl;
+        return Eigen::MatrixXf();
+    }
+
+    // Convert the result to a C++ variable
+    Eigen::MatrixXf output = Eigen::Map<Eigen::MatrixXf>(
+        static_cast<float*>(result.cast<py::array_t<float>>().request().ptr),
+        result.cast<py::array_t<float>>().shape(1),
+        result.cast<py::array_t<float>>().shape(0)
+    );
+
+    return output.transpose();
 }
 
 void TslBag::ProcessImage(cv::Mat& image)
@@ -410,13 +480,10 @@ void TslBag::ProcessImage(cv::Mat& image)
 //     roi = cv::Mat::zeros(roi.size(), roi.type());    
 // }
 
-Eigen::MatrixXf TslBag::Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
+Eigen::MatrixXf TslBag::Retrieve3dPointsDownSampled(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
 {
     // extract the segmented points from the depth image
     PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
-    
-    // print the size of the 3D points
-    // std::cout << "Size of 3D points: " << points3D->size() << std::endl;
 
     // downsample the points
     PointCloud::Ptr cloud_filtered(new PointCloud);
@@ -425,11 +492,18 @@ Eigen::MatrixXf TslBag::Retrieve3dPoints(const std::vector<cv::Point>& pixelCoor
     sor.setLeafSize(0.02f, 0.02f, 0.02f);
     sor.filter(*cloud_filtered);
 
-    // print the size of the downsampled points
-    // std::cout << "Size of downsampled points: " << cloud_filtered->size() << std::endl; 
-
     // convert the pcl point cloud to eigen matrix with 3 columns
     Eigen::MatrixXf X = cloud_filtered->getMatrixXfMap().topRows(3);
+    return X.transpose();
+}
+
+Eigen::MatrixXf TslBag::Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
+{
+    // extract the segmented points from the depth image
+    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
+    
+    // convert the pcl point cloud to eigen matrix with 3 columns
+    Eigen::MatrixXf X = points3D->getMatrixXfMap().topRows(3);
     return X.transpose();
 }
 

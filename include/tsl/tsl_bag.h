@@ -36,8 +36,15 @@
 #include "tsl/tsl.h"
 #include "tsl/util.h"
 
+// #include "Python.h"
+#include <pybind11/embed.h>
+#include <pybind11/numpy.h>
+
+
 using PointCloudMsg = sensor_msgs::PointCloud2;
 using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
+
+namespace py = pybind11;
 
 class TslBag
 {
@@ -58,6 +65,7 @@ private:
     std::string eyelet_init_topic_;
     std::string aglet_topic_;
     std::string result_pc_topic_;
+    std::string pkg_path_;
 
     // 
     bool viusalisation;
@@ -101,11 +109,12 @@ private:
     ImageSegmenter hsv_segmenter_;
 
     // functions
-    Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth);
+    Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth, const std::string method);
     // void ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg);
     void ProcessImage(cv::Mat& image);
     cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg);
     cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg);
+    Eigen::MatrixXf Retrieve3dPointsDownSampled(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth);
     Eigen::MatrixXf Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth);
 
 public:

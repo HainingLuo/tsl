@@ -36,8 +36,8 @@ def order_gaussian_centres(centres):
         eliminate_duplicates=True
     )
 
-    # if the algorithm did not improve the last 200 generations then it will terminate (and disable the max generations)
-    termination = DefaultSingleObjectiveTermination(period=500, n_max_gen=np.inf)
+    # if the algorithm did not improve the last 100 generations then it will terminate (and disable the max generations)
+    termination = DefaultSingleObjectiveTermination(period=100, n_max_gen=np.inf)
 
     res = minimize(
         problem,
@@ -45,8 +45,6 @@ def order_gaussian_centres(centres):
         termination,
         seed=1,
     )
-    # rotate
-
     return res.X
 
 if __name__ == "__main__":
