@@ -392,6 +392,8 @@ Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat&
     py::scoped_interpreter guard{};
     py::module sys = py::module::import("sys");
     sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
+    // printe somehthing
+    std::cout << "Initialising states" << std::endl;
     // Import the Python module
     py::module module = py::module::import("estimate_initial_states");
 
@@ -412,8 +414,10 @@ Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat&
         result = module.attr("estimate_initial_states_ga")(np_array, num_state_points_var);
     }
     else if (method == "SkeletonInterpolation") {
+        // print warning
+        std::cerr << "SkeletonInterpolation not implemented yet" << std::endl;
         // convert the mask to a NumPy array
-        py::array_t<uint8_t> np_array({mask.rows, mask.cols, mask.channels()}, mask.data);
+        py::array_t<uint8_t> np_array({mask.rows, mask.cols}, mask.data);
         // get the 3D coordinates of all the pixels
         std::vector<cv::Point> all_pixelCoordinates;
         for (int i=0; i<mask.rows; i++) {
@@ -421,26 +425,28 @@ Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat&
                 all_pixelCoordinates.push_back(cv::Point(j, i));
             }
         }
+        std::cout << "???" << std::endl;
         // get the 3D points
         Eigen::MatrixXf coordinates3D = Retrieve3dPoints(all_pixelCoordinates, init_depth);
         // convert the 3D coordinates to a NumPy array
         Eigen::MatrixXf coordinates3D_transposed = coordinates3D.transpose();
-        py::array np_array_3d({coordinates3D.rows(), coordinates3D.cols()}, coordinates3D_transposed.data());
-        // // Convert the pixel coordinates to an Eigen matrix
-        // Eigen::MatrixXf pixelCoordinatesMat(pixelCoordinates.size(), 2);
-        // for (int i=0; i<pixelCoordinates.size(); i++) {
-        //     pixelCoordinatesMat(i, 0) = pixelCoordinates[i].x;
-        //     pixelCoordinatesMat(i, 1) = pixelCoordinates[i].y;
-        // }
-        // // Convert Eigen::MatrixXf to NumPy array
-        // Eigen::MatrixXf pixelCoordinatesMat_transposed = pixelCoordinatesMat.transpose();
-        // py::array np_array({pixelCoordinatesMat.rows(), pixelCoordinatesMat.cols()}, pixelCoordinatesMat_transposed.data());
-        // // get the 3D points
-        // Eigen::MatrixXf X = Retrieve3dPoints(pixelCoordinates, init_depth);
-        // // Convert Eigen::MatrixXf to NumPy array
-        // Eigen::MatrixXf X_transposed = X.transpose();
-        // py::array np_array_3d({X.rows(), X.cols()}, X_transposed.data());
-        result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, num_state_points_var);
+        // extract the data from the Eigen matrix
+        int D = coordinates3D.cols();
+        std::cout << "???" << std::endl;
+        py::array_t<float> np_array_3d({mask.rows, mask.cols, D}, coordinates3D_transposed.data());
+        std::cout << "???" << std::endl;
+        // convert init_depth to a float array from char array
+        cv::Mat depth_float;
+        std::cout << "fuck" << std::endl;
+        init_depth.convertTo(depth_float, CV_32F);
+        std::cout << "very fucked" << std::endl;
+        float* depth_data = (float*) depth_float.data;        
+        py::array_t<float> np_array_depth({init_depth.rows, init_depth.cols}, depth_data);
+        // convert the camera.intrinsicMatrix_ to a NumPy array
+        Eigen::Matrix3d intrinsicMatrix = camera.intrinsicMatrix_;
+        Eigen::Matrix3d intrinsicMatrix_transposed = intrinsicMatrix.transpose();   
+        py::array_t<double> np_array_intrinsic({3, 3}, intrinsicMatrix_transposed.data());
+        result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, np_array_depth, np_array_intrinsic, num_state_points_var);
     }
     else {
         // print error

@@ -59,9 +59,9 @@ public:
         }
         return pointCloud;
     }
+    Eigen::Matrix3d intrinsicMatrix_;
 
 private:
-    Eigen::Matrix3d intrinsicMatrix_;
     int width_;  // width of the images
     int height_; // height of the images
 
