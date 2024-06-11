@@ -192,3 +192,75 @@ MatrixXf Tsl::step(const MatrixXf &X)
     }
 
 }
+
+
+/** 
+ * Initialise the states of the rope with Genetic Algorithm 
+ * 
+ * @param X: downsampled point cloud in the form of a matrix (N x 3)
+ * @param num_state_points: number of control points
+ * @return Y: control points in the form of a matrix (M x 3)
+*/
+void Tsl::InitialiseStatesGA(const Eigen::MatrixXf& X, const int num_state_points)
+{
+    // Initialize the Python interpreter
+    py::scoped_interpreter guard{};
+    py::module sys = py::module::import("sys");
+    sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
+    // Import the Python module
+    py::module module = py::module::import("estimate_initial_states");
+
+    // Convert num_state_points to a Python variable
+    py::int_ num_state_points_var(num_state_points);
+    // Convert Eigen::MatrixXf to NumPy array
+    Eigen::MatrixXf X_transposed = X.transpose();
+    py::array np_array({X.rows(), X.cols()}, X_transposed.data());
+    py::object result = module.attr("estimate_initial_states_ga")(np_array, num_state_points_var);
+
+    // Convert the result to a C++ variable
+    Eigen::MatrixXf output = Eigen::Map<Eigen::MatrixXf>(
+        static_cast<float*>(result.cast<py::array_t<float>>().request().ptr),
+        result.cast<py::array_t<float>>().shape(1),
+        result.cast<py::array_t<float>>().shape(0)
+    );
+    Y = output.transpose();
+}
+
+/** 
+ * Initialise the states of the rope with skeletonisation
+ * 
+ * @param mask: binary mask of the shoelace
+ * @param coordinates3D: 3D coordinates of the segmented pixels (? x 3) (not downsampled)
+ * @param num_state_points: number of control points
+ * @return Y: control points in the form of a matrix (M x 3)
+*/
+void Tsl::InitialiseStatesSI(const cv::Mat& mask, 
+                                        const Eigen::MatrixXf& coordinates3D, 
+                                        const int num_state_points)
+{
+    // Initialize the Python interpreter
+    py::scoped_interpreter guard{};
+    py::module sys = py::module::import("sys");
+    sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
+    // Import the Python module
+    py::module module = py::module::import("estimate_initial_states");
+
+    // Convert num_state_points to a Python variable
+    py::int_ num_state_points_var(num_state_points);
+    // convert the mask to a NumPy array
+    py::array_t<uint8_t> np_array({mask.rows, mask.cols}, mask.data);
+    // convert the 3D coordinates to a NumPy array
+    Eigen::MatrixXf coordinates3D_transposed = coordinates3D.transpose();
+    int D = coordinates3D.cols();
+    py::array_t<float> np_array_3d({mask.rows, mask.cols, D}, coordinates3D_transposed.data());
+    py::object result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, 
+                                                        num_state_points_var);
+
+    // Convert the result to a C++ variable
+    Eigen::MatrixXf output = Eigen::Map<Eigen::MatrixXf>(
+        static_cast<float*>(result.cast<py::array_t<float>>().request().ptr),
+        result.cast<py::array_t<float>>().shape(1),
+        result.cast<py::array_t<float>>().shape(0)
+    );
+    Y = output.transpose();
+}

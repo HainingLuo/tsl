@@ -31,6 +31,8 @@ segmentation:
   sat_max: 255
   val_min: 70
   val_max: 255
+  roi: None
+  roni: [267, 270, 92, 154]
 
 plot:
   use_plot: true

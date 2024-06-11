@@ -51,6 +51,7 @@ TslBag::TslBag():
 
     // get the package path
     pkg_path_ = ros::package::getPath("tsl");
+    tsl.pkg_path_ = pkg_path_;
 
     // initialise publishers
     result_img_pub_ = nh_.advertise<sensor_msgs::Image>(plot_topic_, 10);
@@ -77,7 +78,6 @@ TslBag::TslBag():
     ROS_INFO_STREAM("Opened bag: " + bag_path);
 
     // read the number of rgb_topic_ and depth_topic_ messages in the bag
-    // rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_}));
     rosbag::View view_image(bag, rosbag::TopicQuery({rgb_topic_}));
     rosbag::View view_depth(bag, rosbag::TopicQuery({depth_topic_}));
     num_messages = view_image.size()+view_depth.size();
@@ -125,16 +125,48 @@ TslBag::TslBag():
     cv::Mat init_depth = DepthToCvMat(depth_msg);
     
     // initialise the image segmentation
-    hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
-    
-    // initialise the tsl class
-    // tsl = Tsl();
+    std::vector<int> roi_temp, roni_temp;
+    nh_.getParam("/tsl_bag/segmentation/roi", roi_temp);
+    nh_.getParam("/tsl_bag/segmentation/roni", roni_temp);
+    cv::Rect roi(0, 0, resolution.x, resolution.y);
+    if (roi_temp.size() != 4) {
+        ROS_INFO("ROI not set, using the whole image");
+    } else {
+        roi = cv::Rect(roi_temp[0], roi_temp[1], roi_temp[2], roi_temp[3]);
+    }
+    int n_roni = roni_temp.size()/4;
+    std::vector<cv::Rect> roni;
+    for (int i=0; i<n_roni; i++) {
+        cv::Rect rect(roni_temp[i*4], roni_temp[i*4+1], roni_temp[i*4+2], roni_temp[i*4+3]);
+        roni.push_back(rect);
+    }
+    hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_, 
+                                    roi, roni);
 
     // initialise the states
-    ProcessImage(init_img);
     std::string init_method;
     nh_.getParam("/tsl_bag/init_method", init_method);
-    tsl.Y = InitialiseStates(init_img, init_depth, init_method);
+    // get the segmented points
+    cv::Mat init_mask = hsv_segmenter_.segmentImage(init_img);
+    // call the initialisation method
+    if (init_method == "GeneticAlgorithm") {
+        std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.findNonZero(init_mask);
+        Eigen::MatrixXf X = camera.pixels2EigenMatDownSampled(pixelCoordinates, init_depth);
+        tsl.InitialiseStatesGA(X, num_state_points);
+    } else if (init_method == "SkeletonInterpolation") {
+        // get the 3D coordinates of all the pixels
+        std::vector<cv::Point> all_pixelCoordinates;
+        for (int i=0; i<init_mask.rows; i++) {
+            for (int j=0; j<init_mask.cols; j++) {
+                all_pixelCoordinates.push_back(cv::Point(j, i));
+            }
+        }
+        Eigen::MatrixXf coordinates3D = camera.pixels2EigenMat(all_pixelCoordinates, init_depth);
+        tsl.InitialiseStatesSI(init_mask, coordinates3D, num_state_points);
+    } else {
+        ROS_ERROR("Invalid initialisation method");
+    }
+    // tsl.Y = InitialiseStates(init_img, init_depth, init_method);
 
     // read bag_config_path yaml file
     YAML::Node config = YAML::LoadFile(bag_config_path);
@@ -159,14 +191,6 @@ TslBag::TslBag():
     aglet_poses_msg.header.frame_id = robot_frame;
     aglet_poses_msg.poses.push_back(aglet_1_pose);
     aglet_poses_msg.poses.push_back(aglet_2_pose);
-    // // read the initial states
-    // Eigen::MatrixXf initial_states(config["states_init"].size(), 3);
-    // for (int i=0; i<config["states_init"].size(); i++) {
-    //     initial_states.row(i) << config["states_init"][i][0].as<float>(),
-    //                              config["states_init"][i][1].as<float>(),
-    //                              config["states_init"][i][2].as<float>();
-    // }
-    // tsl.Y = initial_states;
 
     // reset the simulation
     ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>(unity_reset_service_);
@@ -183,6 +207,7 @@ TslBag::TslBag():
     reset_srv.request.rope_length.data = rope_length;
     reset_srv.request.rope_radius.data = rope_radius;
     reset_srv.request.gripper_poses = aglet_poses_msg;
+    reset_srv.request.eyelet_poses = eyelet_poses_msg;
     reset_srv.request.gripper_states.data.push_back(0.0); // 0.0: open, 1.0: close
     reset_srv.request.gripper_states.data.push_back(0.0);
     // get the cam2rob transform
@@ -208,22 +233,17 @@ TslBag::TslBag():
     }
 
     // publish the initial eyelet and aglet poses
-    eyelet_init_pub.publish(eyelet_poses_msg);
-    aglet_pub_.publish(aglet_poses_msg);
+    // eyelet_init_pub.publish(eyelet_poses_msg);
+    // aglet_pub_.publish(aglet_poses_msg);
 
-    ROS_INFO_STREAM("Tsl bag node initialised");
-
-    // stop and exit
-    bag.close();
-    ROS_INFO_STREAM("Closed bag: " + bag_path);
-    return;
+    std::cout << "Tsl bag node initialised" << std::endl;
 
     // start the bag loop
     // create a bag view for the rgb, depth and aglet topics
     rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_, aglet_topic_}));
     int count = 0;
     int key_frame_count = 0;
-    float frame_time = 0.0;
+    float frame_time_total = 0.0;
     bool new_action = false;
     // create a dictionary to store the rgb, depth and aglet messages
     std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
@@ -234,6 +254,10 @@ TslBag::TslBag():
     std::vector<float> aglet_2_position_last_update = aglet_2_position;
     // iterate through the messages
     for (rosbag::MessageInstance const m : view) {
+        // return if the node is shutdown
+        if (!ros::ok()) {
+            return;
+        }
         // check if count is in the skip frames
         if (std::find(skip_frames.begin(), skip_frames.end(), count) != skip_frames.end()) {
             count++;
@@ -271,271 +295,193 @@ TslBag::TslBag():
         if (messages["rgb"] != nullptr && messages["depth"] != nullptr) {
             // check if this is a new action
             if (new_action) {
-                // time the procedure
-                auto start = std::chrono::high_resolution_clock::now();
+                try {
+                    // time the procedure
+                    auto start = std::chrono::high_resolution_clock::now();
 
-                // update the last action
-                aglet_1_position_last_update = aglet_1_position;
-                aglet_2_position_last_update = aglet_2_position;
-                // convert the rgb and depth messages to cv::Mat
-                cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
-                ProcessImage(rgb_img);
-                cv::Mat depth_img = DepthToCvMat(messages["depth"]);
-                // color segmentation of the rgb image
-                std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(rgb_img);
-                // get the segmented points
-                Eigen::MatrixXf X = Retrieve3dPointsDownSampled(pixelCoordinates, depth_img);
-                // call the cpd algorithm
-                Eigen::MatrixXf Y = tsl.step(X);
+                    // update the last action
+                    aglet_1_position_last_update = aglet_1_position;
+                    aglet_2_position_last_update = aglet_2_position;
+                    // convert the rgb and depth messages to cv::Mat
+                    cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
+                    cv::Mat depth_img = DepthToCvMat(messages["depth"]);
+                    // color segmentation of the rgb image
+                    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(rgb_img);
+                    // get the segmented points
+                    Eigen::MatrixXf X = camera.pixels2EigenMatDownSampled(pixelCoordinates, depth_img);
+                    // call the cpd algorithm
+                    Eigen::MatrixXf Y = tsl.step(X);
 
-                // print time taken
-                auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double> elapsed = end - start;
-                ROS_INFO_STREAM("Frame " << count << " CPD took " << elapsed.count() << " seconds");
+                    // time cpd
+                    auto cpd_pause = std::chrono::high_resolution_clock::now();
 
-                // call unity adjust service
-                tsl::SimAdjust adjust_srv;
-                // convert the eigen matrix to a posearray message
-                for (int i=0; i<Y.rows(); i++) {
-                    geometry_msgs::Pose pose;
-                    pose.position.x = tsl.Y(i, 0);
-                    pose.position.y = tsl.Y(i, 1);
-                    pose.position.z = tsl.Y(i, 2);
-                    // geometry_msgs::Pose pose = eigenVec2PoseMsg(Y.row(i));
-                    adjust_srv.request.states_est.poses.push_back(pose);
-                }
-                // call the adjust service
-                if (adjust_client.call(adjust_srv)) {
-                    // save the states
-                    for (int i=0; i<adjust_srv.response.states_sim.poses.size(); i++) {
-                        tsl.Y(i, 0) = adjust_srv.response.states_sim.poses[i].position.x;
-                        tsl.Y(i, 1) = adjust_srv.response.states_sim.poses[i].position.y;
-                        tsl.Y(i, 2) = adjust_srv.response.states_sim.poses[i].position.z;
-                    }        
-                } else {
-                    ROS_ERROR("Failed to call service adjust");
-                }
-                // reset for the next action
-                new_action = false;
-                messages["rgb"] = nullptr;
-                messages["depth"] = nullptr;
-                key_frame_count++;
-
-                end = std::chrono::high_resolution_clock::now();
-                elapsed = end - start;
-                frame_time += elapsed.count();
-                ROS_INFO_STREAM("Frame " << count << " took " << elapsed.count() << " seconds");
-
-                // visualise the states with opencv
-                if (use_plot_) {
-                    // cv::imshow("rgb", rgb_img);
-                    // create a blank image
-                    cv::Mat image = cv::Mat::zeros(resolution.y, resolution.x, CV_8UC3);
-                    // draw the states on the image
+                    // call unity adjust service
+                    tsl::SimAdjust adjust_srv;
+                    // convert the eigen matrix to a posearray message
                     for (int i=0; i<Y.rows(); i++) {
-                        // rescale the tsl.Y from plot_x_min_ to plot_x_max_ to 0 to resolution.x
-                        float x = (Y(i, 0)-plot_x_min_)/(plot_x_max_-plot_x_min_)*resolution.x;
-                        float y = (Y(i, 1)-plot_y_min_)/(plot_y_max_-plot_y_min_)*resolution.y;
-                        cv::circle(image, cv::Point((int) x, (int) y), 1, cv::Scalar(0, 255, 0), -1);
+                        geometry_msgs::Pose pose;
+                        pose.position.x = tsl.Y(i, 0);
+                        pose.position.y = tsl.Y(i, 1);
+                        pose.position.z = tsl.Y(i, 2);
+                        // geometry_msgs::Pose pose = eigenVec2PoseMsg(Y.row(i));
+                        adjust_srv.request.states_est.poses.push_back(pose);
                     }
-                    // concatenate the rgb and image
-                    cv::Mat concat_img;
-                    cv::hconcat(rgb_img, image, concat_img);
-                    // publish the result image to result_img_pub_
-                    sensor_msgs::ImagePtr result_img_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", concat_img).toImageMsg();
-                    result_img_pub_.publish(result_img_msg);
-                    
-                    // cv::imshow("result", concat_img);
-                    // cv::waitKey(1);
-                }
+                    // call the adjust service
+                    if (adjust_client.call(adjust_srv)) {
+                        // save the states
+                        for (int i=0; i<adjust_srv.response.states_sim.poses.size(); i++) {
+                            tsl.Y(i, 0) = adjust_srv.response.states_sim.poses[i].position.x;
+                            tsl.Y(i, 1) = adjust_srv.response.states_sim.poses[i].position.y;
+                            tsl.Y(i, 2) = adjust_srv.response.states_sim.poses[i].position.z;
+                        }        
+                    } else {
+                        ROS_ERROR("Failed to call service adjust");
+                    }
+                    // reset for the next action
+                    new_action = false;
+                    messages["rgb"] = nullptr;
+                    messages["depth"] = nullptr;
+                    key_frame_count++;
 
-                // publish X for debug
-                PointCloudMsg::Ptr X_msg (new PointCloudMsg);
-                pcl::PointCloud<pcl::PointXYZ> X_cloud;
-                for (int i=0; i<X.rows(); i++) {
-                    pcl::PointXYZ point;
-                    point.x = X(i, 0);
-                    point.y = X(i, 1);
-                    point.z = X(i, 2);
-                    X_cloud.push_back(point);
-                }
-                pcl::toROSMsg(X_cloud, *X_msg);
-                X_msg->header.frame_id = result_frame_;
-                segmented_pc_pub_.publish(X_msg);
+                    // time adjust
+                    auto stop = std::chrono::high_resolution_clock::now();
+                    std::chrono::duration<double> cpd_duration = cpd_pause-start;
+                    std::chrono::duration<double> adjust_duration = stop-cpd_pause;
+                    std::chrono::duration<double> frame_duration = stop-start;
+                    frame_time_total += frame_duration.count();
+                    std::cout << "\r" << 
+                            "Frame " << std::setw(5) << std::setfill('0') << count << 
+                            ": " << std::fixed << std::setprecision(3) << frame_duration.count() << "s" << 
+                            " (cpd: " << std::fixed << std::setprecision(3) << cpd_duration.count() << "s)" <<
+                            " (adjust: " << std::fixed << std::setprecision(3) << adjust_duration.count() << "s)" <<
+                            std::flush;
 
-                // publish the result states
-                PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
-                pcl::PointCloud<pcl::PointXYZ> result_states;
-                for (int i=0; i<Y.rows(); i++) {
-                    pcl::PointXYZ point;
-                    point.x = Y(i, 0);
-                    point.y = Y(i, 1);
-                    point.z = Y(i, 2);
-                    result_states.push_back(point);
+                    // visualise the states with opencv
+                    if (use_plot_) {
+                        // cv::imshow("rgb", rgb_img);
+                        // create a blank image
+                        cv::Mat image = cv::Mat::zeros(resolution.y, resolution.x, CV_8UC3);
+                        // draw the states on the image
+                        for (int i=0; i<Y.rows(); i++) {
+                            // rescale the tsl.Y from plot_x_min_ to plot_x_max_ to 0 to resolution.x
+                            float x = (Y(i, 0)-plot_x_min_)/(plot_x_max_-plot_x_min_)*resolution.x;
+                            float y = (Y(i, 1)-plot_y_min_)/(plot_y_max_-plot_y_min_)*resolution.y;
+                            cv::circle(image, cv::Point((int) x, (int) y), 1, cv::Scalar(0, 255, 0), -1);
+                        }
+                        // concatenate the rgb and image
+                        cv::Mat concat_img;
+                        cv::hconcat(rgb_img, image, concat_img);
+                        // publish the result image to result_img_pub_
+                        sensor_msgs::ImagePtr result_img_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", concat_img).toImageMsg();
+                        result_img_pub_.publish(result_img_msg);
+                        
+                        // cv::imshow("result", concat_img);
+                        // cv::waitKey(1);
+                    }
+
+                    // publish X for debug
+                    PointCloudMsg::Ptr X_msg (new PointCloudMsg);
+                    pcl::PointCloud<pcl::PointXYZ> X_cloud;
+                    for (int i=0; i<X.rows(); i++) {
+                        pcl::PointXYZ point;
+                        point.x = X(i, 0);
+                        point.y = X(i, 1);
+                        point.z = X(i, 2);
+                        X_cloud.push_back(point);
+                    }
+                    pcl::toROSMsg(X_cloud, *X_msg);
+                    X_msg->header.frame_id = result_frame_;
+                    segmented_pc_pub_.publish(X_msg);
+
+                    // publish the result states
+                    PointCloudMsg::Ptr result_states_msg (new PointCloudMsg);
+                    pcl::PointCloud<pcl::PointXYZ> result_states;
+                    for (int i=0; i<Y.rows(); i++) {
+                        pcl::PointXYZ point;
+                        point.x = Y(i, 0);
+                        point.y = Y(i, 1);
+                        point.z = Y(i, 2);
+                        result_states.push_back(point);
+                    }
+                    pcl::toROSMsg(result_states, *result_states_msg);
+                    result_states_msg->header.frame_id = result_frame_;
+                    result_states_pub_.publish(result_states_msg);
+                } catch (const std::exception& e) {
+                    ROS_ERROR_STREAM("Exception caught: " << e.what());
+                    // close the bag
+                    bag.close();
+                    return;
                 }
-                pcl::toROSMsg(result_states, *result_states_msg);
-                result_states_msg->header.frame_id = result_frame_;
-                result_states_pub_.publish(result_states_msg);
             }
         }
     }
     // print the average frame time
-    ROS_INFO_STREAM("Average frame time: " << frame_time/count);
-    ROS_INFO_STREAM("Average key frame time: " << frame_time/key_frame_count);
+    std::cout << std::endl;
+    std::cout << "Average frame time: " << frame_time_total/count << std::endl;
+    std::cout << "Average key frame time: " << frame_time_total/key_frame_count << std::endl;
 }
 
 
-
-Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth, const std::string method)
-{
-    // Initialize the Python interpreter
-    py::scoped_interpreter guard{};
-    py::module sys = py::module::import("sys");
-    sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
-    // printe somehthing
-    std::cout << "Initialising states" << std::endl;
-    // Import the Python module
-    py::module module = py::module::import("estimate_initial_states");
-
-    // get the segmented points
-    cv::Mat mask = hsv_segmenter_.segmentImage(init_img);
-    std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.findNonZero(mask);
-    // Convert num_state_points to a Python variable
-    py::int_ num_state_points_var(num_state_points);
-
-    py::object result;
-    // Call the Python function and pass the NumPy array and num_state_points as arguments
-    if (method == "GeneticAlgorithm") {
-        // get the 3D points
-        Eigen::MatrixXf X = Retrieve3dPointsDownSampled(pixelCoordinates, init_depth);
-        // Convert Eigen::MatrixXf to NumPy array
-        Eigen::MatrixXf X_transposed = X.transpose();
-        py::array np_array({X.rows(), X.cols()}, X_transposed.data());
-        result = module.attr("estimate_initial_states_ga")(np_array, num_state_points_var);
-    }
-    else if (method == "SkeletonInterpolation") {
-        // print warning
-        std::cerr << "SkeletonInterpolation not implemented yet" << std::endl;
-        // convert the mask to a NumPy array
-        py::array_t<uint8_t> np_array({mask.rows, mask.cols}, mask.data);
-        // get the 3D coordinates of all the pixels
-        std::vector<cv::Point> all_pixelCoordinates;
-        for (int i=0; i<mask.rows; i++) {
-            for (int j=0; j<mask.cols; j++) {
-                all_pixelCoordinates.push_back(cv::Point(j, i));
-            }
-        }
-        std::cout << "???" << std::endl;
-        // get the 3D points
-        Eigen::MatrixXf coordinates3D = Retrieve3dPoints(all_pixelCoordinates, init_depth);
-        // convert the 3D coordinates to a NumPy array
-        Eigen::MatrixXf coordinates3D_transposed = coordinates3D.transpose();
-        // extract the data from the Eigen matrix
-        int D = coordinates3D.cols();
-        std::cout << "???" << std::endl;
-        py::array_t<float> np_array_3d({mask.rows, mask.cols, D}, coordinates3D_transposed.data());
-        std::cout << "???" << std::endl;
-        // convert init_depth to a float array from char array
-        cv::Mat depth_float;
-        std::cout << "fuck" << std::endl;
-        init_depth.convertTo(depth_float, CV_32F);
-        std::cout << "very fucked" << std::endl;
-        float* depth_data = (float*) depth_float.data;        
-        py::array_t<float> np_array_depth({init_depth.rows, init_depth.cols}, depth_data);
-        // convert the camera.intrinsicMatrix_ to a NumPy array
-        Eigen::Matrix3d intrinsicMatrix = camera.intrinsicMatrix_;
-        Eigen::Matrix3d intrinsicMatrix_transposed = intrinsicMatrix.transpose();   
-        py::array_t<double> np_array_intrinsic({3, 3}, intrinsicMatrix_transposed.data());
-        result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, np_array_depth, np_array_intrinsic, num_state_points_var);
-    }
-    else {
-        // print error
-        std::cerr << "Invalid method: " << method << std::endl;
-        return Eigen::MatrixXf();
-    }
-
-    // Convert the result to a C++ variable
-    Eigen::MatrixXf output = Eigen::Map<Eigen::MatrixXf>(
-        static_cast<float*>(result.cast<py::array_t<float>>().request().ptr),
-        result.cast<py::array_t<float>>().shape(1),
-        result.cast<py::array_t<float>>().shape(0)
-    );
-
-    return output.transpose();
-}
-
-void TslBag::ProcessImage(cv::Mat& image)
-{
-    // set region [270:270+154, 267:267+92, :] to zero
-    cv::Mat roi = image(cv::Rect(267, 270, 92, 154));
-    roi = cv::Mat::zeros(roi.size(), roi.type());
-}
-
-// void TslBag::ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg)
+// Eigen::MatrixXf TslBag::InitialiseStates(const cv::Mat& init_img, const cv::Mat& init_depth, const std::string method)
 // {
-//     // set region [270:270+154, 267:267+92, :] to zero
-//     cv_bridge::CvImagePtr cv_ptr;
-//     try {
-//         cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);
-//     } catch (cv_bridge::Exception& e) {
-//         ROS_ERROR("cv_bridge exception: %s", e.what());
-//         return;
+//     // Initialize the Python interpreter
+//     py::scoped_interpreter guard{};
+//     py::module sys = py::module::import("sys");
+//     sys.attr("path").attr("insert")(0, pkg_path_ +"/scripts");
+//     // Import the Python module
+//     py::module module = py::module::import("estimate_initial_states");
+
+//     // get the segmented points
+//     cv::Mat mask = hsv_segmenter_.segmentImage(init_img);
+//     std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.findNonZero(mask);
+//     // Convert num_state_points to a Python variable
+//     py::int_ num_state_points_var(num_state_points);
+
+//     py::object result;
+//     // Call the Python function and pass the NumPy array and num_state_points as arguments
+//     if (method == "GeneticAlgorithm") {
+//         // get the 3D points
+//         Eigen::MatrixXf X = camera.pixels2EigenMatDownSampled(pixelCoordinates, init_depth);
+//         // Convert Eigen::MatrixXf to NumPy array
+//         Eigen::MatrixXf X_transposed = X.transpose();
+//         py::array np_array({X.rows(), X.cols()}, X_transposed.data());
+//         result = module.attr("estimate_initial_states_ga")(np_array, num_state_points_var);
 //     }
-//     cv::Mat image = cv_ptr->image;
-//     cv::Mat roi = image(cv::Rect(267, 270, 92, 154));
-//     roi = cv::Mat::zeros(roi.size(), roi.type());    
+//     else if (method == "SkeletonInterpolation") {
+//         // convert the mask to a NumPy array
+//         py::array_t<uint8_t> np_array({mask.rows, mask.cols}, mask.data);
+//         // get the 3D coordinates of all the pixels
+//         std::vector<cv::Point> all_pixelCoordinates;
+//         for (int i=0; i<mask.rows; i++) {
+//             for (int j=0; j<mask.cols; j++) {
+//                 all_pixelCoordinates.push_back(cv::Point(j, i));
+//             }
+//         }
+//         // get the 3D points
+//         Eigen::MatrixXf coordinates3D = camera.pixels2EigenMat(all_pixelCoordinates, init_depth);
+//         // convert the 3D coordinates to a NumPy array
+//         Eigen::MatrixXf coordinates3D_transposed = coordinates3D.transpose();
+//         // extract the data from the Eigen matrix
+//         int D = coordinates3D.cols();
+//         py::array_t<float> np_array_3d({mask.rows, mask.cols, D}, coordinates3D_transposed.data());
+//         //
+//         result = module.attr("estimate_initial_states_si")(np_array, np_array_3d, num_state_points_var);
+//     }
+//     else {
+//         // print error
+//         std::cerr << "Invalid method: " << method << std::endl;
+//         return Eigen::MatrixXf();
+//     }
+
+//     // Convert the result to a C++ variable
+//     Eigen::MatrixXf output = Eigen::Map<Eigen::MatrixXf>(
+//         static_cast<float*>(result.cast<py::array_t<float>>().request().ptr),
+//         result.cast<py::array_t<float>>().shape(1),
+//         result.cast<py::array_t<float>>().shape(0)
+//     );
+
+//     return output.transpose();
 // }
-
-Eigen::MatrixXf TslBag::Retrieve3dPointsDownSampled(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
-{
-    // extract the segmented points from the depth image
-    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
-
-    // downsample the points
-    PointCloud::Ptr cloud_filtered(new PointCloud);
-    pcl::VoxelGrid<pcl::PointXYZ> sor;
-    sor.setInputCloud(points3D);
-    sor.setLeafSize(0.02f, 0.02f, 0.02f);
-    sor.filter(*cloud_filtered);
-
-    // convert the pcl point cloud to eigen matrix with 3 columns
-    Eigen::MatrixXf X = cloud_filtered->getMatrixXfMap().topRows(3);
-    return X.transpose();
-}
-
-Eigen::MatrixXf TslBag::Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth)
-{
-    // extract the segmented points from the depth image
-    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, depth);
-    
-    // convert the pcl point cloud to eigen matrix with 3 columns
-    Eigen::MatrixXf X = points3D->getMatrixXfMap().topRows(3);
-    return X.transpose();
-}
-
-cv::Mat TslBag::ImageToCvMat(const sensor_msgs::ImageConstPtr& msg)
-{
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return cv::Mat();
-    }
-    return cv_ptr->image;
-}
-
-cv::Mat TslBag::DepthToCvMat(const sensor_msgs::ImageConstPtr& msg)
-{
-    cv_bridge::CvImagePtr cv_ptr;
-    try {
-        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::TYPE_16UC1);
-    } catch (cv_bridge::Exception& e) {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
-        return cv::Mat();
-    }
-    return cv_ptr->image;
-}
 
 
 int main(int argc, char **argv) {

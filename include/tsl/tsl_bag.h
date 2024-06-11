@@ -36,15 +36,11 @@
 #include "tsl/tsl.h"
 #include "tsl/util.h"
 
-// #include "Python.h"
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
 
 
 using PointCloudMsg = sensor_msgs::PointCloud2;
 using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
 
-namespace py = pybind11;
 
 class TslBag
 {
@@ -105,23 +101,14 @@ private:
     float plot_y_min_;
     float plot_y_max_;
     
-    // segmenter
+    /** Image segmenter in HSV space */
     ImageSegmenter hsv_segmenter_;
 
-    // functions
-    Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth, const std::string method);
-    // void ProcessImage(const sensor_msgs::ImageConstPtr& rgb_msg);
-    void ProcessImage(cv::Mat& image);
-    cv::Mat ImageToCvMat(const sensor_msgs::ImageConstPtr& msg);
-    cv::Mat DepthToCvMat(const sensor_msgs::ImageConstPtr& msg);
-    Eigen::MatrixXf Retrieve3dPointsDownSampled(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth);
-    Eigen::MatrixXf Retrieve3dPoints(const std::vector<cv::Point>& pixelCoordinates, const cv::Mat& depth);
+    // /** Initialise the states of the rope */
+    // Eigen::MatrixXf InitialiseStates(const cv::Mat& image, const cv::Mat& depth, const std::string method);
 
 public:
     TslBag();
-    // ~TslBag();
-    void PointCloudCallback(const PointCloudMsg::ConstPtr& msg);
-    void RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg);
 };
 
 #endif // TSL_BAG_H

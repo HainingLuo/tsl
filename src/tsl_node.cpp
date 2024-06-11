@@ -138,7 +138,7 @@ void TslNode::RGBDCallback(const sensor_msgs::ImageConstPtr& rgb_msg,
     // cv::findNonZero(mask, pixelCoordinates);
 
     // convert the pixel coordinates to 3D points
-    PointCloud::Ptr points3D = camera.convertPixelsToPointCloud(pixelCoordinates, cv_depth_ptr->image);
+    PointCloud::Ptr points3D = camera.pixels2PointCloud(pixelCoordinates, cv_depth_ptr->image);
     // PoinCloud::Ptr points3D = camera.convertMaskToPointCloud(mask, cv_depth_ptr->image);
         
     // downsample the points

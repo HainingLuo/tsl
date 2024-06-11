@@ -1,6 +1,7 @@
 geometry_msgs/PoseArray states_est
 std_msgs/Float32 rope_length
 std_msgs/Float32 rope_radius
+geometry_msgs/PoseArray eyelet_poses
 geometry_msgs/PoseArray gripper_poses
 std_msgs/Float32MultiArray gripper_states
 geometry_msgs/Transform cam2rob
