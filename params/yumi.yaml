@@ -1,0 +1,51 @@
+visualisation: true
+init_method: "SkeletonInterpolation" # "GeneticAlgorithm" or "SkeletonInterpolation"
+camera: "yumi_l515"
+camera_frame: "yumi_l515_color_optical_frame"
+num_state_points: 25
+rgb_topic: "/yumi_l515/color/image_raw"
+depth_topic: "/yumi_l515/aligned_depth_to_color/image_raw"
+camera_info_topic: "/yumi_l515/color/camera_info"
+eyelet_pose_topic: "/eyelet_pose"
+aglet_pose_topic: "/aglet_pose"
+result_pc_topic: "/tsl/result_states"
+unity_adjust_service_: "/unity_adjust"
+unity_reset_service_: "/unity_reset"
+unity_predict_service_: "/unity_predict"
+
+robot_frame: "body_default"
+camera_frame: "yumi_l515_color_optical_frame"
+result_frame: "yumi_l515_color_optical_frame"
+bag_path: "/tsl_data/shoelacing_4_2_new.bag"
+bag_config_path: "/tsl_data/shoelacing_4_2.yaml"
+rope_length: 0.42
+rope_radius: 0.01
+cam_pose: [0, 0, 0, 0, 0, 0, 1]
+skip_frames: [209,210,729,730]
+
+segmentation:
+  hue_min: 30
+  hue_max: 70
+  sat_min: 30
+  sat_max: 255
+  val_min: 70
+  val_max: 255
+  roi: None
+  roni: [267, 270, 92, 154]
+
+plot:
+  use_plot: true
+  plot_topic: "/tsl/plot"
+  x_min: -0.3
+  x_max: 0.3
+  y_min: -0.2
+  y_max: 0.2
+
+cpd:
+  alpha: 1.0
+  beta: 0.5
+  gamma: 1.2
+  tolerance: 1e-4
+  max_iter: 100
+  mu: 0.1
+  k: 8

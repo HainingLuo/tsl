@@ -35,8 +35,25 @@ private:
     std::string camera_info_topic_;
     std::string unity_reset_service_;
     std::string unity_adjust_service_;
+    std::string robot_frame;
+    std::string camera_frame;
+    std::string eyelet_topic_;
+    std::string aglet_topic_;
+    std::string result_pc_topic_;
+    std::string pkg_path_;
+
+    // 
+    bool viusalisation;
+    int num_state_points;
+    int num_messages;
+    std::vector<float> cam_pose;
+    cv::Point resolution;
+    float rope_length;
+    float rope_radius;
+    std::vector<float> aglet_1_position, aglet_2_position;
 
     ros::NodeHandle nh_;
+    ros::Publisher result_img_pub_;
     ros::Publisher result_states_pub_;
     ros::ServiceClient adjust_client;
     Tsl tsl;
@@ -51,12 +68,20 @@ private:
     int sat_max_;
     int val_min_;
     int val_max_;
+
+    // plot parameters
+    bool use_plot_;
+    std::string plot_topic_;
+    float plot_x_min_;
+    float plot_x_max_;
+    float plot_y_min_;
+    float plot_y_max_;
     
     // segmenter
     ImageSegmenter hsv_segmenter_;
 
     // functions
-    Eigen::MatrixXf InitialiseStates();
+    // Eigen::MatrixXf InitialiseStates();
 
 public:
     TslNode();

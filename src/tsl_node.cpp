@@ -8,10 +8,27 @@ TslNode::TslNode():
     nh_.getParam("/tsl/rgb_topic", rgb_topic_);
     nh_.getParam("/tsl/depth_topic", depth_topic_);
     nh_.getParam("/tsl/camera_info_topic", camera_info_topic_);
+    nh_.getParam("/tsl_bag/eyelet_pose_topic", eyelet_topic_);
+    nh_.getParam("/tsl_bag/aglet_pose_topic", aglet_topic_);
+    nh_.getParam("/tsl_bag/result_pc_topic", result_pc_topic_);
     nh_.getParam("/tsl/result_frame", result_frame_);
     nh_.getParam("/tsl/unity_reset", unity_reset_service_);
     nh_.getParam("/tsl/unity_adjust", unity_adjust_service_);
-
+    nh_.getParam("/tsl_bag/cam_pose", cam_pose);
+    nh_.getParam("/tsl_bag/robot_frame", robot_frame);
+    nh_.getParam("/tsl_bag/camera_frame", camera_frame);
+    nh_.getParam("/tsl_bag/num_state_points", num_state_points);
+    nh_.getParam("/tsl_bag/rope_length", rope_length);
+    nh_.getParam("/tsl_bag/rope_radius", rope_radius);
+    nh_.getParam("/tsl_bag/visualisation", viusalisation);
+    // cpd parameters
+    nh_.getParam("/tsl_bag/alpha", tsl.alpha);
+    nh_.getParam("/tsl_bag/beta", tsl.beta);
+    nh_.getParam("/tsl_bag/gamma", tsl.gamma);
+    nh_.getParam("/tsl_bag/tolerance", tsl.tolerance);
+    nh_.getParam("/tsl_bag/max_iter", tsl.max_iter);
+    nh_.getParam("/tsl_bag/mu", tsl.mu);
+    nh_.getParam("/tsl_bag/k", tsl.k);
     // get segmentation parameters
     nh_.getParam("/tsl/segmentation/hue_min", hue_min_);
     nh_.getParam("/tsl/segmentation/hue_max", hue_max_);
@@ -19,17 +36,39 @@ TslNode::TslNode():
     nh_.getParam("/tsl/segmentation/sat_max", sat_max_);
     nh_.getParam("/tsl/segmentation/val_min", val_min_);
     nh_.getParam("/tsl/segmentation/val_max", val_max_);
+    // get plot parameters
+    nh_.getParam("/tsl_bag/plot/use_plot", use_plot_);
+    nh_.getParam("/tsl_bag/plot/plot_topic", plot_topic_);
+    nh_.getParam("/tsl_bag/plot/x_min", plot_x_min_);
+    nh_.getParam("/tsl_bag/plot/x_max", plot_x_max_);
+    nh_.getParam("/tsl_bag/plot/y_min", plot_y_min_);
+    nh_.getParam("/tsl_bag/plot/y_max", plot_y_max_);
 
+
+    // get the package path
+    pkg_path_ = ros::package::getPath("tsl");
+    tsl.pkg_path_ = pkg_path_;
 
     // initialise publishers
-    result_states_pub_ = nh_.advertise<PointCloudMsg>("/tsl/result_states", 10);
+    result_img_pub_ = nh_.advertise<sensor_msgs::Image>(plot_topic_, 10);
+    result_states_pub_ = nh_.advertise<PointCloudMsg>(result_pc_topic_, 10);
+    // ros::Publisher aglet_pub_ = nh_.advertise<geometry_msgs::PoseArray>(aglet_topic_, 10);
 
     // initialise subscribers
-    ros::Subscriber sub = nh_.subscribe<PointCloudMsg>("/tsl/segmented_pc", 10, 
-                            &TslNode::PointCloudCallback, this);
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_(tf_buffer_);
+    // ros::Subscriber sub = nh_.subscribe<PointCloudMsg>("/tsl/segmented_pc", 10, 
+    //                         &TslNode::PointCloudCallback, this);
 
     // initialise services
-    adjust_client = nh_.serviceClient<tsl::SimAdjust>("/unity_adjust");
+    adjust_client = nh_.serviceClient<tsl::SimAdjust>(unity_adjust_service_);
+
+    // wait for 1 second
+    ros::Duration(1).sleep();
+
+    ////////////////
+    // modified till here
+    ////////////////
 
     // initialise the camera class
     sensor_msgs::CameraInfoConstPtr info_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(camera_info_topic_, nh_);
@@ -54,12 +93,31 @@ TslNode::TslNode():
     
     // initialise the image segmentation
     hsv_segmenter_ = ImageSegmenter(hue_min_, hue_max_, sat_min_, sat_max_, val_min_, val_max_);
-    
-    // initialise the tsl class
-    tsl = Tsl();
 
     // initialise the states
-    tsl.Y = InitialiseStates();
+    std::string init_method;
+    nh_.getParam("/tsl_bag/init_method", init_method);
+    // get the segmented points
+    cv::Mat init_mask = hsv_segmenter_.segmentImage(init_img);
+    // call the initialisation method
+    if (init_method == "GeneticAlgorithm") {
+        std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.findNonZero(init_mask);
+        Eigen::MatrixXf X = camera.pixels2EigenMatDownSampled(pixelCoordinates, init_depth);
+        tsl.InitialiseStatesGA(X, num_state_points);
+    } else if (init_method == "SkeletonInterpolation") {
+        // get the 3D coordinates of all the pixels
+        std::vector<cv::Point> all_pixelCoordinates;
+        for (int i=0; i<init_mask.rows; i++) {
+            for (int j=0; j<init_mask.cols; j++) {
+                all_pixelCoordinates.push_back(cv::Point(j, i));
+            }
+        }
+        Eigen::MatrixXf coordinates3D = camera.pixels2EigenMat(all_pixelCoordinates, init_depth);
+        tsl.InitialiseStatesSI(init_mask, coordinates3D, num_state_points);
+    } else {
+        ROS_ERROR("Invalid initialisation method");
+    }
+    // tsl.Y = InitialiseStates(init_img, init_depth, init_method);
 
     // reset the simulation
     ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>("/unity_reset");
