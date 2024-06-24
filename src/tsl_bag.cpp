@@ -4,23 +4,28 @@ TslBag::TslBag():
     nh_{}
 {
     // get parameters
-    // get image and info topics
+    // get topics
     nh_.getParam("/tsl_bag/rgb_topic", rgb_topic_);
     nh_.getParam("/tsl_bag/depth_topic", depth_topic_);
     nh_.getParam("/tsl_bag/camera_info_topic", camera_info_topic_);
     nh_.getParam("/tsl_bag/eyelet_init_topic", eyelet_init_topic_);
     nh_.getParam("/tsl_bag/eyelet_pose_topic", eyelet_topic_);
     nh_.getParam("/tsl_bag/aglet_pose_topic", aglet_topic_);
+    nh_.getParam("/tsl_bag/segmented_pc_topic", segmented_pc_topic_);
     nh_.getParam("/tsl_bag/result_pc_topic", result_pc_topic_);
+    // get frames
     nh_.getParam("/tsl_bag/result_frame", result_frame_);
+    nh_.getParam("/tsl_bag/robot_frame", robot_frame);
+    nh_.getParam("/tsl_bag/camera_frame", camera_frame);
+    // get services
     nh_.getParam("/tsl_bag/unity_reset_service_", unity_reset_service_);
     nh_.getParam("/tsl_bag/unity_adjust_service_", unity_adjust_service_);
     nh_.getParam("/tsl_bag/unity_predict_service_", unity_predict_service_);
+    // get paths
     nh_.getParam("/tsl_bag/bag_path", bag_path);
     nh_.getParam("/tsl_bag/bag_config_path", bag_config_path);
+    // get tsl parameters
     nh_.getParam("/tsl_bag/cam_pose", cam_pose);
-    nh_.getParam("/tsl_bag/robot_frame", robot_frame);
-    nh_.getParam("/tsl_bag/camera_frame", camera_frame);
     nh_.getParam("/tsl_bag/num_state_points", num_state_points);
     nh_.getParam("/tsl_bag/rope_length", rope_length);
     nh_.getParam("/tsl_bag/rope_radius", rope_radius);
@@ -48,14 +53,13 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/plot/x_max", plot_x_max_);
     nh_.getParam("/tsl_bag/plot/y_min", plot_y_min_);
     nh_.getParam("/tsl_bag/plot/y_max", plot_y_max_);
-
     // get the package path
     pkg_path_ = ros::package::getPath("tsl");
     tsl.pkg_path_ = pkg_path_;
 
     // initialise publishers
     result_img_pub_ = nh_.advertise<sensor_msgs::Image>(plot_topic_, 10);
-    segmented_pc_pub_ = nh_.advertise<PointCloudMsg>("/tsl/segmented_pc", 10);
+    segmented_pc_pub_ = nh_.advertise<PointCloudMsg>(segmented_pc_topic_, 10);
     result_states_pub_ = nh_.advertise<PointCloudMsg>(result_pc_topic_, 10);
     ros::Publisher aglet_pub_ = nh_.advertise<geometry_msgs::PoseArray>(aglet_topic_, 10);
     ros::Publisher eyelet_init_pub = nh_.advertise<geometry_msgs::PoseArray>(eyelet_init_topic_, 10);
@@ -63,10 +67,9 @@ TslBag::TslBag():
     // initialise subscribers
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_(tf_buffer_);
-    // ros::Subscriber sub = nh_.subscribe<PointCloudMsg>("/tsl/segmented_pc", 10, 
-    //                         &TslBag::PointCloudCallback, this);
 
     // initialise services
+    ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>(unity_reset_service_);
     adjust_client = nh_.serviceClient<tsl::SimAdjust>(unity_adjust_service_);
 
     // wait for 1 second
@@ -191,9 +194,10 @@ TslBag::TslBag():
     aglet_poses_msg.header.frame_id = robot_frame;
     aglet_poses_msg.poses.push_back(aglet_1_pose);
     aglet_poses_msg.poses.push_back(aglet_2_pose);
+    aglet_1_position_last_update = aglet_1_position;
+    aglet_2_position_last_update = aglet_2_position;
 
     // reset the simulation
-    ros::ServiceClient reset_client = nh_.serviceClient<tsl::SimReset>(unity_reset_service_);
     tsl::SimReset reset_srv;
     // convert the eigen matrix to a posearray message
     for (int i=0; i<tsl.Y.rows(); i++) {
@@ -204,12 +208,6 @@ TslBag::TslBag():
         // geometry_msgs::Pose pose = eigenVec2PoseMsg(tsl.Y.row(i));
         reset_srv.request.states_est.poses.push_back(pose);
     }
-    reset_srv.request.rope_length.data = rope_length;
-    reset_srv.request.rope_radius.data = rope_radius;
-    reset_srv.request.gripper_poses = aglet_poses_msg;
-    reset_srv.request.eyelet_poses = eyelet_poses_msg;
-    reset_srv.request.gripper_states.data.push_back(0.0); // 0.0: open, 1.0: close
-    reset_srv.request.gripper_states.data.push_back(0.0);
     // get the cam2rob transform
     geometry_msgs::TransformStamped cam2rob_msg;
     try {
@@ -218,6 +216,12 @@ TslBag::TslBag():
         ROS_WARN("%s", ex.what());
     }
     reset_srv.request.cam2rob = cam2rob_msg.transform;
+    reset_srv.request.rope_length.data = rope_length;
+    reset_srv.request.rope_radius.data = rope_radius;
+    reset_srv.request.gripper_poses = aglet_poses_msg;
+    reset_srv.request.eyelet_poses = eyelet_poses_msg;
+    reset_srv.request.gripper_states.data.push_back(0.0); // 0.0: open, 1.0: close
+    reset_srv.request.gripper_states.data.push_back(0.0);
     // call the reset service
     if (reset_client.call(reset_srv)) {
         // save the states
@@ -241,17 +245,10 @@ TslBag::TslBag():
     // start the bag loop
     // create a bag view for the rgb, depth and aglet topics
     rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_, aglet_topic_}));
-    int count = 0;
-    int key_frame_count = 0;
-    float frame_time_total = 0.0;
-    bool new_action = false;
     // create a dictionary to store the rgb, depth and aglet messages
     std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
     messages["rgb"] = nullptr;
     messages["depth"] = nullptr;
-    // create a pose array message to store the aglet poses
-    std::vector<float> aglet_1_position_last_update = aglet_1_position;
-    std::vector<float> aglet_2_position_last_update = aglet_2_position;
     // iterate through the messages
     for (rosbag::MessageInstance const m : view) {
         // return if the node is shutdown

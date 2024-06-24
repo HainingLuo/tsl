@@ -2,21 +2,28 @@
 #define TSL_BAG_H
 
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
 #include <rosbag/query.h>
 #include <rosbag/message_instance.h>
+
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/PointCloud2.h>
+
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl/filters/voxel_grid.h>
+
 #include <cv_bridge/cv_bridge.h>
+
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -25,18 +32,14 @@
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/CameraInfo.h>
-#include <tsl/SimAdjust.h>
-#include <tsl/SimReset.h>
-#include <tsl/segmenter.h>
-#include <tsl/camera.h>
+#include "tsl/SimAdjust.h"
+#include "tsl/SimReset.h"
+#include "tsl/segmenter.h"
+#include "tsl/camera.h"
 
-#include <tsl/gmm.h>
+#include "tsl/gmm.h"
 #include "tsl/tsl.h"
 #include "tsl/util.h"
-
-
 
 using PointCloudMsg = sensor_msgs::PointCloud2;
 using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
@@ -46,24 +49,31 @@ class TslBag
 {
 private:
     // topics
-    std::string result_frame_;
     std::string rgb_topic_;
     std::string depth_topic_;
     std::string camera_info_topic_;
-    std::string unity_reset_service_;
-    std::string unity_adjust_service_;
-    std::string unity_predict_service_;
-    std::string robot_frame;
-    std::string camera_frame;
-    std::string bag_path;
-    std::string bag_config_path;
     std::string eyelet_topic_;
     std::string eyelet_init_topic_;
     std::string aglet_topic_;
+    std::string segmented_pc_topic_;
     std::string result_pc_topic_;
+
+    // services
+    std::string unity_reset_service_;
+    std::string unity_adjust_service_;
+    std::string unity_predict_service_;
+
+    // frames
+    std::string result_frame_;
+    std::string robot_frame;
+    std::string camera_frame;
+
+    // paths
+    std::string bag_path;
+    std::string bag_config_path;
     std::string pkg_path_;
 
-    // 
+    // tsl params
     bool viusalisation;
     int num_state_points;
     int num_messages;
@@ -73,6 +83,11 @@ private:
     float rope_radius;
     std::vector<int> skip_frames;
     std::vector<float> aglet_1_position, aglet_2_position;
+    int count = 0;
+    int key_frame_count = 0;
+    float frame_time_total = 0.0;
+    bool new_action = false;
+    std::vector<float> aglet_1_position_last_update, aglet_2_position_last_update;
 
     ros::NodeHandle nh_;
     ros::Publisher result_img_pub_;
