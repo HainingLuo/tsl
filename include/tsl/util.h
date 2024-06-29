@@ -179,6 +179,12 @@ geometry_msgs::Transform poseToTransform(const geometry_msgs::Pose& pose) {
     return transform;
 }
 
+// geometry_msgs::TransformStamped vecToTransformStamped(const std::vector<float>& vec) {
+//     geometry_msgs::TransformStamped transform;
+//     transform.transform = vec2PoseMsg(vec);
+//     return transform;
+// }
+
 geometry_msgs::TransformStamped getInverseTransform(const geometry_msgs::TransformStamped& transform) {
     // Convert the transform to Eigen and get the inverse
     Eigen::Isometry3d eigen_transform;

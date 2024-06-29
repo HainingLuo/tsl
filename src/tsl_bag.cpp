@@ -86,22 +86,6 @@ TslBag::TslBag():
     num_messages = view_image.size()+view_depth.size();
     ROS_INFO_STREAM("Number of messages in the bag: " << num_messages);
 
-    // static tf broadcaster for camera pose
-    static tf2_ros::StaticTransformBroadcaster br;
-    geometry_msgs::TransformStamped tf_msg;
-    tf_msg.header.stamp = ros::Time::now();
-    tf_msg.header.frame_id = robot_frame;
-    tf_msg.child_frame_id = camera_frame;
-    tf_msg.transform.translation.x = cam_pose[0];
-    tf_msg.transform.translation.y = cam_pose[1];
-    tf_msg.transform.translation.z = cam_pose[2];
-    tf_msg.transform.rotation.x = cam_pose[3];
-    tf_msg.transform.rotation.y = cam_pose[4];
-    tf_msg.transform.rotation.z = cam_pose[5];
-    tf_msg.transform.rotation.w = cam_pose[6];
-    br.sendTransform(tf_msg);
-    ROS_INFO_STREAM("Broadcasted camera pose");
-
     // load the camera info message
     rosbag::View view_info(bag, rosbag::TopicQuery({camera_info_topic_}));
     rosbag::View::iterator info_it = view_info.begin();
@@ -169,31 +153,87 @@ TslBag::TslBag():
     } else {
         ROS_ERROR("Invalid initialisation method");
     }
-    // tsl.Y = InitialiseStates(init_img, init_depth, init_method);
 
-    // read bag_config_path yaml file
-    YAML::Node config = YAML::LoadFile(bag_config_path);
-
-    // read the initial eyelet poses
-    std::vector<geometry_msgs::Pose> eyelet_poses;
-    for (int i=0; i<config["eyelets_init"].size(); i++) {
-        geometry_msgs::Pose pose;
-        pose = vec2PoseMsg(config["eyelets_init"][i].as<std::vector<float>>());
-        eyelet_poses.push_back(pose);
+    // read the initial eyelet poses from the bag
+    rosbag::View view_eyelet(bag, rosbag::TopicQuery({eyelet_topic_}));
+    // rosbag::View::iterator eyelet_it = view_eyelet.begin();
+    // loop through the eyelet messages till one that has a non empty pose array
+    bool eyelet_found = false;
+    geometry_msgs::PoseArray::ConstPtr eyelet_poses_msg_ptr;
+    for (rosbag::MessageInstance const eyelet_m : view_eyelet) {
+        // eyelet_it++;
+        // rosbag::MessageInstance const eyelet_m = *eyelet_it;
+        eyelet_poses_msg_ptr = eyelet_m.instantiate<geometry_msgs::PoseArray>();
+        if (eyelet_poses_msg_ptr->poses.size() != 0) {
+            eyelet_found = true;
+            break;
+        }
     }
-    geometry_msgs::PoseArray eyelet_poses_msg;
-    eyelet_poses_msg.header.frame_id = result_frame_;
-    eyelet_poses_msg.poses = eyelet_poses;
-    // read the initial aglet poses
-    geometry_msgs::PoseArray aglet_poses_msg;
-    geometry_msgs::Pose aglet_1_pose, aglet_2_pose;
-    aglet_1_position = config["aglet_1_init"].as<std::vector<float>>();
-    aglet_2_position = config["aglet_2_init"].as<std::vector<float>>();
-    aglet_1_pose.position = vec2PointMsg(aglet_1_position);
-    aglet_2_pose.position = vec2PointMsg(aglet_2_position);
-    aglet_poses_msg.header.frame_id = robot_frame;
-    aglet_poses_msg.poses.push_back(aglet_1_pose);
-    aglet_poses_msg.poses.push_back(aglet_2_pose);
+    if (!eyelet_found) {
+        ROS_ERROR("No eyelet poses found in the bag");
+        // return;
+    }
+    geometry_msgs::PoseArray eyelet_poses_msg = *eyelet_poses_msg_ptr;
+    std::vector<geometry_msgs::Pose> eyelet_poses;
+    for (int i=0; i<eyelet_poses_msg.poses.size(); i++) {
+        eyelet_poses.push_back(eyelet_poses_msg.poses[i]);
+    }
+    
+    // read the initial aglet poses from the bag
+    rosbag::View view_aglet(bag, rosbag::TopicQuery({aglet_topic_}));
+    // rosbag::View::iterator aglet_it = view_aglet.begin();
+    // loop through the aglet messages till one that has a pose array with 2 poses, both has non zero x
+    bool aglet_found = false;
+    geometry_msgs::PoseArray::ConstPtr aglet_poses_msg_ptr;
+    // while (!aglet_found) {
+    for (rosbag::MessageInstance const aglet_m : view_aglet) {
+        // aglet_it++;
+        // rosbag::MessageInstance const aglet_m = *aglet_it;
+        aglet_poses_msg_ptr = aglet_m.instantiate<geometry_msgs::PoseArray>();
+        if (aglet_poses_msg_ptr->poses.size() == 2 && 
+            aglet_poses_msg_ptr->poses[0].position.x != 0.0 && 
+            aglet_poses_msg_ptr->poses[1].position.x != 0.0) {
+            aglet_found = true;
+            break;
+        }
+    }
+    if (!aglet_found) {
+        ROS_ERROR("No aglet poses found in the bag");
+        return;
+    }
+    geometry_msgs::PoseArray aglet_poses_msg = *aglet_poses_msg_ptr;
+    std::vector<float> aglet_1_position = {aglet_poses_msg.poses[0].position.x, 
+                                            aglet_poses_msg.poses[0].position.y, 
+                                            aglet_poses_msg.poses[0].position.z};
+    std::vector<float> aglet_2_position = {aglet_poses_msg.poses[1].position.x,
+                                            aglet_poses_msg.poses[1].position.y,
+                                            aglet_poses_msg.poses[1].position.z};
+    // print the initial aglet poses
+    ROS_INFO_STREAM("Initial aglet 1 position: " << aglet_1_position[0] << ", " << aglet_1_position[1] << ", " << aglet_1_position[2]);
+
+    // // read bag_config_path yaml file
+    // YAML::Node config = YAML::LoadFile(bag_config_path);
+
+    // // read the initial eyelet poses
+    // std::vector<geometry_msgs::Pose> eyelet_poses;
+    // for (int i=0; i<config["eyelets_init"].size(); i++) {
+    //     geometry_msgs::Pose pose;
+    //     pose = vec2PoseMsg(config["eyelets_init"][i].as<std::vector<float>>());
+    //     eyelet_poses.push_back(pose);
+    // }
+    // geometry_msgs::PoseArray eyelet_poses_msg;
+    // eyelet_poses_msg.header.frame_id = result_frame_;
+    // eyelet_poses_msg.poses = eyelet_poses;
+    // // read the initial aglet poses
+    // geometry_msgs::PoseArray aglet_poses_msg;
+    // geometry_msgs::Pose aglet_1_pose, aglet_2_pose;
+    // aglet_1_position = config["aglet_1_init"].as<std::vector<float>>();
+    // aglet_2_position = config["aglet_2_init"].as<std::vector<float>>();
+    // aglet_1_pose.position = vec2PointMsg(aglet_1_position);
+    // aglet_2_pose.position = vec2PointMsg(aglet_2_position);
+    // aglet_poses_msg.header.frame_id = robot_frame;
+    // aglet_poses_msg.poses.push_back(aglet_1_pose);
+    // aglet_poses_msg.poses.push_back(aglet_2_pose);
     aglet_1_position_last_update = aglet_1_position;
     aglet_2_position_last_update = aglet_2_position;
 
@@ -210,11 +250,16 @@ TslBag::TslBag():
     }
     // get the cam2rob transform
     geometry_msgs::TransformStamped cam2rob_msg;
-    try {
-        cam2rob_msg = tf_buffer_.lookupTransform(robot_frame, camera_frame, ros::Time(0));
-    } catch (tf2::TransformException &ex) {
-        ROS_WARN("%s", ex.what());
-    }
+    cam2rob_msg.header.stamp = ros::Time::now();
+    cam2rob_msg.header.frame_id = robot_frame;
+    cam2rob_msg.child_frame_id = camera_frame;
+    cam2rob_msg.transform.translation.x = cam_pose[0];
+    cam2rob_msg.transform.translation.y = cam_pose[1];
+    cam2rob_msg.transform.translation.z = cam_pose[2];
+    cam2rob_msg.transform.rotation.x = cam_pose[3];
+    cam2rob_msg.transform.rotation.y = cam_pose[4];
+    cam2rob_msg.transform.rotation.z = cam_pose[5];
+    cam2rob_msg.transform.rotation.w = cam_pose[6];
     reset_srv.request.cam2rob = cam2rob_msg.transform;
     reset_srv.request.rope_length.data = rope_length;
     reset_srv.request.rope_radius.data = rope_radius;
