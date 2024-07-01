@@ -1,9 +1,10 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="dataset"              value="hand"/>
+    <arg name="dataset"              value="yumi"/>
     
     <node pkg="tsl" name="tsl_bag" type="tsl_bag" respawn="false" output="screen">
         <rosparam command="load" file="$(find tsl)/params/hand_bag.yaml" if="$(eval arg('dataset') == 'hand')"/>
+        <rosparam command="load" file="$(find tsl)/params/yumi_bag.yaml" if="$(eval arg('dataset') == 'yumi')"/>
     </node>
     <!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find tsl)/rviz/tsl_bag_hands.rviz" /> -->
 

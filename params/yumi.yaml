@@ -20,7 +20,9 @@ camera_frame: "yumi_l515_color_optical_frame"
 result_frame: "yumi_l515_color_optical_frame"
 rope_length: 1.0
 rope_radius: 0.01
-cam_pose: [0, 0, 0, 0, 0, 0, 1]
+cam_pose: [0.11402912172823736, -0.002473922574375894, 0.3408948530896191, \
+                                  -0.6381706638619635, 0.6315954687156851, -0.3108826429470674, \
+                                    0.3117327810907012]
 
 segmentation:
   hue_min: 25

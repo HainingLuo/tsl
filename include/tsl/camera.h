@@ -115,16 +115,40 @@ private:
      * @param u: column index of the pixel
      * @param v: row index of the pixel
      * @param depthImage: depth image
+     * @param region: check depth value in a region around the pixel
+     * @param mode: 0 for mean depth, 1 for median depth
      * @return depth value at the pixel
     */
-    double readDepth(int u, int v, const cv::Mat& depthImage) 
+    double readDepth(int u, int v, const cv::Mat& depthImage, int region=3, int mode=1) 
     {
-        double depth = 0.001*depthImage.at<u_int16_t>(v, u);
-        // remove nan and zero depth values
-        if (depth == 0 || std::isnan(depth)) {
+        std::vector<double> depth;
+        for (int i = -region; i <= region; i++) {
+            for (int j = -region; j <= region; j++) {
+                int d_t = 0.001*depthImage.at<u_int16_t>(v + i, u + j);
+                if (d_t != 0 && !std::isnan(d_t)) {
+                    depth.push_back(d_t);
+                }
+            }
+        }
+        if (depth.size() == 0) {
             return -1;
         }
-        return depth;        
+        else {
+            if (mode == 0) {
+                return std::accumulate(depth.begin(), depth.end(), 0.0) / depth.size();
+            }
+            else {
+                std::sort(depth.begin(), depth.end());
+                return depth[depth.size() / 2];
+            }
+        }
+        
+        // double depth = 0.001*depthImage.at<u_int16_t>(v, u);
+        // // remove nan and zero depth values
+        // if (depth == 0 || std::isnan(depth)) {
+        //     return -1;
+        // }
+        // return depth;        
     }
 
     /**

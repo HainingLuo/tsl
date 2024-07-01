@@ -14,6 +14,7 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 
 #include <sensor_msgs/Image.h>
+#include <sensor_msgs/CompressedImage.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/PointCloud2.h>
 
@@ -50,6 +51,7 @@ class TslBag
 private:
     // topics
     std::string rgb_topic_;
+    bool compressed_rgb_;
     std::string depth_topic_;
     std::string camera_info_topic_;
     std::string eyelet_topic_;
@@ -70,7 +72,6 @@ private:
 
     // paths
     std::string bag_path;
-    std::string bag_config_path;
     std::string pkg_path_;
 
     // tsl params

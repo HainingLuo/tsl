@@ -6,6 +6,7 @@ TslBag::TslBag():
     // get parameters
     // get topics
     nh_.getParam("/tsl_bag/rgb_topic", rgb_topic_);
+    compressed_rgb_ = rgb_topic_.find("compressed") != std::string::npos;
     nh_.getParam("/tsl_bag/depth_topic", depth_topic_);
     nh_.getParam("/tsl_bag/camera_info_topic", camera_info_topic_);
     nh_.getParam("/tsl_bag/eyelet_init_topic", eyelet_init_topic_);
@@ -23,7 +24,6 @@ TslBag::TslBag():
     nh_.getParam("/tsl_bag/unity_predict_service_", unity_predict_service_);
     // get paths
     nh_.getParam("/tsl_bag/bag_path", bag_path);
-    nh_.getParam("/tsl_bag/bag_config_path", bag_config_path);
     // get tsl parameters
     nh_.getParam("/tsl_bag/cam_pose", cam_pose);
     nh_.getParam("/tsl_bag/num_state_points", num_state_points);
@@ -101,8 +101,14 @@ TslBag::TslBag():
     // load the first image message
     rosbag::View::iterator it = view_image.begin();
     rosbag::MessageInstance const m = *it;
-    sensor_msgs::Image::ConstPtr image_msg = m.instantiate<sensor_msgs::Image>();
-    cv::Mat init_img = ImageToCvMat(image_msg);
+    cv::Mat init_img;
+    if (compressed_rgb_) {
+        sensor_msgs::CompressedImage::ConstPtr compressed_image_msg = m.instantiate<sensor_msgs::CompressedImage>();
+        init_img = cv::imdecode(cv::Mat(compressed_image_msg->data), cv::IMREAD_COLOR);
+    } else {
+        sensor_msgs::Image::ConstPtr image_msg = m.instantiate<sensor_msgs::Image>();
+        init_img = ImageToCvMat(image_msg);
+    }
     resolution = cv::Point(init_img.cols, init_img.rows); // width, height
 
     // load the first depth message
@@ -210,30 +216,6 @@ TslBag::TslBag():
                                             aglet_poses_msg.poses[1].position.z};
     // print the initial aglet poses
     ROS_INFO_STREAM("Initial aglet 1 position: " << aglet_1_position[0] << ", " << aglet_1_position[1] << ", " << aglet_1_position[2]);
-
-    // // read bag_config_path yaml file
-    // YAML::Node config = YAML::LoadFile(bag_config_path);
-
-    // // read the initial eyelet poses
-    // std::vector<geometry_msgs::Pose> eyelet_poses;
-    // for (int i=0; i<config["eyelets_init"].size(); i++) {
-    //     geometry_msgs::Pose pose;
-    //     pose = vec2PoseMsg(config["eyelets_init"][i].as<std::vector<float>>());
-    //     eyelet_poses.push_back(pose);
-    // }
-    // geometry_msgs::PoseArray eyelet_poses_msg;
-    // eyelet_poses_msg.header.frame_id = result_frame_;
-    // eyelet_poses_msg.poses = eyelet_poses;
-    // // read the initial aglet poses
-    // geometry_msgs::PoseArray aglet_poses_msg;
-    // geometry_msgs::Pose aglet_1_pose, aglet_2_pose;
-    // aglet_1_position = config["aglet_1_init"].as<std::vector<float>>();
-    // aglet_2_position = config["aglet_2_init"].as<std::vector<float>>();
-    // aglet_1_pose.position = vec2PointMsg(aglet_1_position);
-    // aglet_2_pose.position = vec2PointMsg(aglet_2_position);
-    // aglet_poses_msg.header.frame_id = robot_frame;
-    // aglet_poses_msg.poses.push_back(aglet_1_pose);
-    // aglet_poses_msg.poses.push_back(aglet_2_pose);
     aglet_1_position_last_update = aglet_1_position;
     aglet_2_position_last_update = aglet_2_position;
 
@@ -291,9 +273,12 @@ TslBag::TslBag():
     // create a bag view for the rgb, depth and aglet topics
     rosbag::View view(bag, rosbag::TopicQuery({rgb_topic_, depth_topic_, aglet_topic_}));
     // create a dictionary to store the rgb, depth and aglet messages
-    std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
-    messages["rgb"] = nullptr;
-    messages["depth"] = nullptr;
+    // std::map<std::string, sensor_msgs::Image::ConstPtr> messages;
+    // messages["rgb"] = nullptr;
+    // messages["depth"] = nullptr;
+    std::map<std::string, cv::Mat> messages;
+    messages["rgb"] = cv::Mat();
+    messages["depth"] = cv::Mat();
     // iterate through the messages
     for (rosbag::MessageInstance const m : view) {
         // return if the node is shutdown
@@ -310,9 +295,18 @@ TslBag::TslBag():
         }
         // process the message
         if (m.getTopic() == rgb_topic_) {
-            messages["rgb"] = m.instantiate<sensor_msgs::Image>();
+            // messages["rgb"] = m.instantiate<sensor_msgs::Image>();
+            if (compressed_rgb_) {
+                sensor_msgs::CompressedImage::ConstPtr compressed_image_msg = m.instantiate<sensor_msgs::CompressedImage>();
+                messages["rgb"] = cv::imdecode(cv::Mat(compressed_image_msg->data), cv::IMREAD_COLOR);
+            } else {
+                sensor_msgs::Image::ConstPtr image_msg = m.instantiate<sensor_msgs::Image>();
+                messages["rgb"] = ImageToCvMat(image_msg);
+            }
         } else if (m.getTopic() == depth_topic_) {
-            messages["depth"] = m.instantiate<sensor_msgs::Image>();
+            // messages["depth"] = m.instantiate<sensor_msgs::Image>();
+            sensor_msgs::Image::ConstPtr depth_msg = m.instantiate<sensor_msgs::Image>();
+            messages["depth"] = DepthToCvMat(depth_msg);
         } else if (m.getTopic() == aglet_topic_) {
             geometry_msgs::PoseArray::ConstPtr aglet_msg = m.instantiate<geometry_msgs::PoseArray>();
             if (aglet_msg->poses[0].position.x != 0.0) {
@@ -334,7 +328,8 @@ TslBag::TslBag():
             aglet_pub_.publish(aglet_poses_msg);
         }
         // check if we have both rgb and depth messages
-        if (messages["rgb"] != nullptr && messages["depth"] != nullptr) {
+        // if (messages["rgb"] != nullptr && messages["depth"] != nullptr) {
+        if (messages["rgb"].empty() && messages["depth"].empty()) {
             // check if this is a new action
             if (new_action) {
                 try {
@@ -345,8 +340,10 @@ TslBag::TslBag():
                     aglet_1_position_last_update = aglet_1_position;
                     aglet_2_position_last_update = aglet_2_position;
                     // convert the rgb and depth messages to cv::Mat
-                    cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
-                    cv::Mat depth_img = DepthToCvMat(messages["depth"]);
+                    // cv::Mat rgb_img = ImageToCvMat(messages["rgb"]);
+                    // cv::Mat depth_img = DepthToCvMat(messages["depth"]);
+                    cv::Mat rgb_img = messages["rgb"];
+                    cv::Mat depth_img = messages["depth"];
                     // color segmentation of the rgb image
                     std::vector<cv::Point> pixelCoordinates = hsv_segmenter_.retrievePoints(rgb_img);
                     // get the segmented points
@@ -381,8 +378,10 @@ TslBag::TslBag():
                     }
                     // reset for the next action
                     new_action = false;
-                    messages["rgb"] = nullptr;
-                    messages["depth"] = nullptr;
+                    // messages["rgb"] = nullptr;
+                    // messages["depth"] = nullptr;
+                    messages["rgb"] = cv::Mat();
+                    messages["depth"] = cv::Mat();
                     key_frame_count++;
 
                     // time adjust

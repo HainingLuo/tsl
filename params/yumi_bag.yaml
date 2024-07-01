@@ -1,9 +1,9 @@
 visualisation: true
-init_method: "SkeletonInterpolation" # "GeneticAlgorithm" or "SkeletonInterpolation"
+init_method: "GeneticAlgorithm" # "GeneticAlgorithm" or "SkeletonInterpolation"
 camera: "yumi_l515"
 camera_frame: "yumi_l515_color_optical_frame"
-num_state_points: 25
-rgb_topic: "/yumi_l515/color/image_raw"
+num_state_points: 35
+rgb_topic: "/yumi_l515/color/image_raw/compressed"
 depth_topic: "/yumi_l515/aligned_depth_to_color/image_raw"
 camera_info_topic: "/yumi_l515/color/camera_info"
 eyelet_init_topic: "/eyelet_init"
@@ -15,15 +15,16 @@ unity_adjust_service_: "/unity_adjust"
 unity_reset_service_: "/unity_reset"
 unity_predict_service_: "/unity_predict"
 
-robot_frame: "body_default"
+robot_frame: "yumi_base_link"
 camera_frame: "yumi_l515_color_optical_frame"
 result_frame: "yumi_l515_color_optical_frame"
 bag_path: "/tsl_data/shoelacing_yumi_8.bag"
-bag_config_path: "/tsl_data/shoelacing_yumi_8.yaml"
-rope_length: 0.42
+rope_length: 1
 rope_radius: 0.01
-cam_pose: [0, 0, 0, 0, 0, 0, 1]
-skip_frames: [209,210,729,730]
+cam_pose: [0.11402912172823736, -0.002473922574375894, 0.3408948530896191, \
+                                  -0.6381706638619635, 0.6315954687156851, -0.3108826429470674, \
+                                    0.3117327810907012]
+skip_frames: []
 
 segmentation:
   hue_min: 30
@@ -33,7 +34,7 @@ segmentation:
   val_min: 70
   val_max: 255
   roi: None
-  roni: [267, 270, 92, 154]
+  roni: None
 
 plot:
   use_plot: true
